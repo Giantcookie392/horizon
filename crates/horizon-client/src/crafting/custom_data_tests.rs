@@ -72,6 +72,8 @@ impl mod_api::Hooks for WidthIngredient {
             ("big", Tag::Int(100000)),
             ("half", Tag::Float(0.5f32.to_bits())),
             ("tenth", Tag::Double(0.1f64.to_bits())),
+            ("whole", Tag::Byte(1)),
+            ("exp", Tag::Short(1000)),
         ];
         for (key, tag) in want {
             assert_eq!(event.data.get(&key.into()), Some(&tag), "{key}");
@@ -92,7 +94,7 @@ fn custom_ingredient_scalars_reach_hook_with_narrowest_width() {
                 [],
             );
             let mut source = json!({"type": "width:ingredient", "flag": true, "one": 1,
-            "small": 300, "big": 100000, "half": 0.5, "tenth": 0.1});
+            "small": 300, "big": 100000, "half": 0.5, "tenth": 0.1, "whole": 1.0, "exp": 1e3});
             super::Ingredient::resolve(&mut source, &context);
             let parsed = super::Ingredient::parse(&source, &items).unwrap();
             assert_eq!(parsed.order, ["minecraft:emerald"]);
