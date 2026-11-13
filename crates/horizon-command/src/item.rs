@@ -34,6 +34,7 @@ pub const DECODED_COMPONENTS: &[&str] = &[
     "minecraft:item_name",
     "minecraft:item_model",
     "minecraft:block_entity_data",
+    "minecraft:block_state",
 ];
 
 /// Validate and decode a component into the value representation shared with stacks.
@@ -122,6 +123,7 @@ pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), Strin
         "minecraft:enchantments" | "minecraft:stored_enchantments" => enchantment_map(t, reg),
         "minecraft:custom_name" | "minecraft:item_name" => super::component::decode(t),
         "minecraft:item_model" => item_model(t).map(|_| ()),
+        "minecraft:block_state" => block_state(t),
         // TypedEntityData.codec: the type is the compound's id.
         "minecraft:block_entity_data" => match t {
             Tag::Compound(c) => match c.get(&"id".into()) {
@@ -159,6 +161,21 @@ fn item_model(value: &Tag) -> Result<Tag, String> {
     let id = horizon_core::identifier::Identifier::parse(&text)
         .map_err(|error| format!("Not a valid resource location: {text} {error}"))?;
     Ok(Tag::String(id.to_string().as_str().into()))
+}
+
+/// `BlockItemStateProperties.CODEC`: an unbounded string-to-string map.
+/// Property names and values are opaque Java strings, not identifiers or block lookups.
+fn block_state(value: &Tag) -> Result<(), String> {
+    let Tag::Compound(properties) = value else {
+        return Err(not_map(value));
+    };
+    if properties
+        .values()
+        .any(|value| !matches!(value, Tag::String(_)))
+    {
+        return Err("Not a string".into());
+    }
+    Ok(())
 }
 /// `ItemEnchantments.CODEC`: registry keys and boxed-number levels in 1..=255.
 /// `UnboundedMapCodec` reports failed entries; commands do not retain its partial map.

@@ -54,9 +54,14 @@ Native registrations retain their persistent NBT validation contract.
 
 The shared decoder currently covers `damage`, `repair_cost`, `max_damage`,
 `max_stack_size`, `rarity`, `enchantments`, `stored_enchantments`, `custom_name`,
-`item_name`, `item_model`, and `block_entity_data` in the `minecraft` namespace.
+`item_name`, `item_model`, `block_state`, and `block_entity_data` in the `minecraft` namespace.
+`block_state` is an unbounded string-to-string property map (including the empty map).
+Names and values are literal, case-sensitive strings: no block/property lookup,
+identifier normalization, numeric coercion or implicit property defaults applies.
+Every entry participates in equality, independently of map order; non-string values
+reject the recipe rather than retaining a partial map.
 `item_model` accepts valid resource identifiers without requiring an existing model;
-bare names and an empty namespace normalize to `minecraft`. The other 111 registered
+bare names and an empty namespace normalize to `minecraft`. The other 110 registered
 built-ins use stored-value matching while their shared decoders are added
 incrementally in **#3875**. Their absence is not a load refusal.
 

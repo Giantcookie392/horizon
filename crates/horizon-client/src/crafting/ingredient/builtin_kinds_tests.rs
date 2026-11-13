@@ -340,3 +340,248 @@ fn item_model_component_literals_decode_validate_and_match() {
         );
     }
 }
+
+#[test]
+fn block_state_component_recipes_decode_validate_and_match() {
+    let mut items = Items::empty();
+    items.component_defaults = std::sync::Arc::new(std::collections::HashMap::from([(
+        "minecraft:beehive".into(),
+        crate::json_nbt::json_to_compound(
+            serde_json::json!({"minecraft:block_state":{"honey_level":"0"}})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap(),
+    )]));
+    let root = tempfile::tempdir().unwrap();
+    let load = load();
+    let context = load.loop_context(LoopSide::Server, []);
+    let recipes = |ingredient: Value| {
+        crate::crafting::Recipes::from_sources(
+            root.path(),
+            &items,
+            &horizon_world::loot::PackOverlay::NONE,
+            vec![
+                (
+                    "fixture:block_state".into(),
+                    serde_json::json!({
+                        "type":"minecraft:smelting","ingredient":ingredient,
+                        "result":{"id":"minecraft:diamond"},"experience":0.0,"cookingtime":20
+                    }),
+                ),
+                (
+                    "fixture:fallback".into(),
+                    serde_json::json!({
+                        "type":"minecraft:smelting","ingredient":"minecraft:beehive",
+                        "result":{"id":"minecraft:emerald"},"experience":0.0,"cookingtime":20
+                    }),
+                ),
+            ],
+            &load,
+        )
+        .unwrap()
+    };
+    let ingredient = |patch: Value, strict: bool| {
+        serde_json::json!({
+            "type":"neoforge:components","items":"minecraft:beehive",
+            "components":patch,"strict":strict
+        })
+    };
+    let stack = |state: Value| {
+        let mut stack = ItemStack::new("minecraft:beehive", 1);
+        let value = crate::json_nbt::json_to_compound(state.as_object().unwrap()).unwrap();
+        stack
+            .data_mut()
+            .set_loot_component("minecraft:block_state", &Some(Tag::Compound(value)));
+        stack
+    };
+    let plain = ItemStack::new("minecraft:beehive", 1);
+    let zero = stack(serde_json::json!({"honey_level":"0"}));
+    let empty = stack(serde_json::json!({}));
+    let arbitrary = stack(serde_json::json!({
+        "Unknown:Property":"Not A Block Value", "":"", "unicode":"雪😀", "number":"01"
+    }));
+    for (patch, candidate) in [
+        (serde_json::json!({"honey_level":"0"}), &zero),
+        (serde_json::json!({}), &empty),
+        (
+            serde_json::json!({"number":"01","unicode":"雪😀","":"","Unknown:Property":"Not A Block Value"}),
+            &arbitrary,
+        ),
+    ] {
+        let loaded = recipes(ingredient(
+            serde_json::json!({"minecraft:block_state":patch}),
+            true,
+        ));
+        // Initialize the cooking index before measuring concrete candidate matching.
+        assert_eq!(
+            &*loaded
+                .cook(&context, "minecraft:smelting", candidate)
+                .unwrap()
+                .result
+                .item,
+            "minecraft:diamond"
+        );
+        let (_, allocations) = horizon_threads::allocation_probe::measure(|| {
+            assert_eq!(
+                &*loaded
+                    .cook(&context, "minecraft:smelting", candidate)
+                    .unwrap()
+                    .result
+                    .item,
+                "minecraft:diamond"
+            );
+        });
+        assert_eq!(allocations.calls, 0, "{allocations:?}");
+    }
+    let loaded = recipes(ingredient(
+        serde_json::json!({"minecraft:block_state":{"honey_level":"0"}}),
+        true,
+    ));
+    for candidate in [&plain, &zero] {
+        assert_eq!(
+            &*loaded
+                .cook(&context, "minecraft:smelting", candidate)
+                .unwrap()
+                .result
+                .item,
+            "minecraft:diamond"
+        );
+    }
+    for candidate in [
+        empty.clone(),
+        stack(serde_json::json!({"honey_level":"00"})),
+        stack(serde_json::json!({"honey_level":"0","extra":""})),
+        stack(serde_json::json!({"Honey_Level":"0"})),
+    ] {
+        assert_eq!(
+            &*loaded
+                .cook(&context, "minecraft:smelting", &candidate)
+                .unwrap()
+                .result
+                .item,
+            "minecraft:emerald"
+        );
+    }
+    let mut extra = zero.clone();
+    extra.data_mut().set_loot_component(
+        "minecraft:custom_data",
+        &Some(Tag::compound([("extra", Tag::Int(1))])),
+    );
+    assert_eq!(
+        &*loaded
+            .cook(&context, "minecraft:smelting", &extra)
+            .unwrap()
+            .result
+            .item,
+        "minecraft:emerald"
+    );
+    let loose = recipes(ingredient(
+        serde_json::json!({"minecraft:block_state":{"honey_level":"0"}}),
+        false,
+    ));
+    assert_eq!(
+        &*loose
+            .cook(&context, "minecraft:smelting", &extra)
+            .unwrap()
+            .result
+            .item,
+        "minecraft:diamond"
+    );
+    let removal = recipes(ingredient(
+        serde_json::json!({"!minecraft:block_state":{}}),
+        false,
+    ));
+    let mut removed = plain.clone();
+    let patch = Tag::compound([("!minecraft:block_state", Tag::Compound(Default::default()))]);
+    (_, removed.extra) = crate::item_data::decode_components(Some(&patch));
+    for (candidate, expected) in [
+        (&plain, "minecraft:emerald"),
+        (&empty, "minecraft:emerald"),
+        (&removed, "minecraft:diamond"),
+    ] {
+        assert_eq!(
+            &*removal
+                .cook(&context, "minecraft:smelting", candidate)
+                .unwrap()
+                .result
+                .item,
+            expected
+        );
+    }
+    assert_eq!(
+        &*loaded
+            .cook(&context, "minecraft:smelting", &removed)
+            .unwrap()
+            .result
+            .item,
+        "minecraft:emerald"
+    );
+    for payload in [
+        serde_json::json!(null),
+        serde_json::json!([]),
+        serde_json::json!("honey_level=0"),
+        serde_json::json!(0),
+        serde_json::json!({"honey_level":0}),
+        serde_json::json!({"honey_level":true}),
+        serde_json::json!({"honey_level":null}),
+        serde_json::json!({"honey_level":{}}),
+        serde_json::json!({"honey_level":[]}),
+        serde_json::json!({"honey_level":"0","unknown":5}),
+    ] {
+        let value = ingredient(serde_json::json!({"minecraft:block_state":payload}), false);
+        // Nested JSON null is refused by JsonOps→NbtOps before component decoding.
+        if let Ok(patch) =
+            crate::json_nbt::json_to_compound(value["components"].as_object().unwrap())
+        {
+            let rule = IngredientRule::Components {
+                patch,
+                removed: Vec::new(),
+                strict: false,
+            };
+            let error = components::validate(&rule, &items).unwrap_err();
+            assert!(
+                error.contains("component minecraft:block_state:"),
+                "{error}"
+            );
+        }
+        let refused = recipes(value);
+        assert_eq!(
+            refused.cooking.len(),
+            1,
+            "only the malformed recipe is omitted"
+        );
+        // The malformed whole recipe is omitted; the unrelated recipe still crafts.
+        assert!(
+            refused
+                .cooking
+                .iter()
+                .all(|recipe| recipe.id != "fixture:block_state")
+        );
+        assert_eq!(
+            &*refused
+                .cook(&context, "minecraft:smelting", &plain)
+                .unwrap()
+                .result
+                .item,
+            "minecraft:emerald"
+        );
+    }
+    // Codec.STRING preserves Java UTF-16, including unpaired surrogates; it is
+    // deliberately not Identifier.CODEC or a UTF-8/lossy conversion.
+    for units in [vec![0xd800], vec![0xdc00], vec![0xd83d, 0xde00]] {
+        let raw = Tag::Compound(std::collections::BTreeMap::from([(
+            horizon_core::nbt::JavaString(units.clone()),
+            Tag::String(horizon_core::nbt::JavaString(units)),
+        )]));
+        assert_eq!(
+            horizon_command::item::decoded_component_value(
+                "minecraft:block_state",
+                &raw,
+                &items.component_registry
+            )
+            .unwrap(),
+            raw,
+        );
+    }
+}
