@@ -133,7 +133,7 @@ class ExperienceOrbMergeTests(unittest.TestCase):
         fixture = (FIXTURE.replace("ORB_MERGES", rust_fn("orb_merges"))
                    .replace("AWARD_ORB", rust_fn("award_orb"))
                    .replace("MERGE_NEW_ORB", rust_fn("merge_new_orb"))
-                   .replace("MERGE_ORB", rust_fn("merge_orb")))
+                   .replace("MERGE_ORB", rust_fn("merge_orb", owner="Game")))
         with tempfile.TemporaryDirectory() as folder:
             src, exe = Path(folder) / "orb.rs", Path(folder) / "orb.exe"
             src.write_text(fixture, encoding="utf-8")

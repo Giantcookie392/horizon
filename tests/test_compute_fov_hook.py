@@ -11,7 +11,7 @@ from rust_items import rust_fn
 class ComputeFovHookTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
     def test_computed_fov_override_and_invalid_fallback(self):
-        actual = rust_fn("fov_degrees")
+        actual = rust_fn("fov_degrees", owner="Game")
         fixture = r"""
 struct View;
 impl View {
