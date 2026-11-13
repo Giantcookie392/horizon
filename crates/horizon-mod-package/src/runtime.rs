@@ -159,6 +159,7 @@ mod tests {
                 match expected.side {
                     Side::Both => "both",
                     Side::Client => "client",
+                    Side::Server => "server",
                 }
             );
             if native {
