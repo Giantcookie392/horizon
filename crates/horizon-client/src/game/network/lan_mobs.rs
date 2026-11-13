@@ -612,6 +612,39 @@ mod tests {
         );
     }
 
+    /// #3806 cases 1 to 3: a mob's player target, host or guest, is kept tick
+    /// after tick while it stays valid, however near the other players are,
+    /// and the guests' order or a guest joining changes nothing. Each tick
+    /// feeds the binding back in, as the mob loop does.
+    #[test]
+    fn a_valid_player_target_is_kept_across_ticks_and_guest_changes() {
+        let ticks = |host: &PlayerView, rounds: &[GuestViews], start: Option<u32>| {
+            let mut bound = start;
+            for guests in rounds {
+                bound = choose(MOB, true, true, Some(host), guests, bound);
+                let order: Vec<u32> = guests.iter().map(|g| g.0).collect();
+                assert_eq!(bound, start, "with guests {order:?}");
+            }
+        };
+        let rounds = |a: f64, b: f64| {
+            vec![
+                vec![(7, view(a, false)), (8, view(b, false))],
+                // The same guests in the other order.
+                vec![(8, view(b, false)), (7, view(a, false))],
+                // A third guest joins, nearer than anyone.
+                vec![
+                    (7, view(a, false)),
+                    (9, view(0.5, false)),
+                    (8, view(b, false)),
+                ],
+            ]
+        };
+        // 1. The host it targets, farther than both guests.
+        ticks(&view(20.0, false), &rounds(2.0, 3.0), None);
+        // 2. A guest it targets, farther than the host and the other guest.
+        ticks(&view(2.0, false), &rounds(20.0, 3.0), Some(7));
+    }
+
     #[test]
     fn a_leashed_mob_sees_its_holder_even_when_another_player_is_closer() {
         let Some(mut cow) = mob_of("minecraft:cow") else {
