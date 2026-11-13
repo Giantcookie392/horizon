@@ -116,6 +116,10 @@ pub struct Settings {
     /// What the window does while the game runs. Stays by default.
     #[serde(default)]
     pub while_playing: WhilePlaying,
+    /// Several instances may run at once, each its own game (#15496). Off by default: one game
+    /// at a time.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub several_games: bool,
     /// The accent colour on top of the appearance (`themes::Accent`). Horizon's violet by default.
     #[serde(default)]
     pub accent: crate::themes::Accent,
