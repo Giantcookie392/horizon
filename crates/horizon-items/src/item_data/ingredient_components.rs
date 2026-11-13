@@ -73,6 +73,10 @@ pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
             a.data().and_then(|d| d.other(id)),
             b.data().and_then(|d| d.other(id)),
         ),
+        "minecraft:recipes" => recipe_keys_equal(
+            a.data().and_then(|d| d.other(id)),
+            b.data().and_then(|d| d.other(id)),
+        ),
         "minecraft:rarity" => rarity(a) == rarity(b),
         _ => stored_component_equal(id, a, b),
     }
@@ -247,6 +251,26 @@ fn identifier_equal(a: Option<&Tag>, b: Option<&Tag>) -> bool {
         prefix.encode_utf16().chain(path.iter().copied())
     }
     units(a).eq(units(b))
+}
+
+/// `List<ResourceKey<Recipe<?>>>.equals`, borrowing each key's identifier.
+fn recipe_keys_equal(a: Option<&Tag>, b: Option<&Tag>) -> bool {
+    fn keys(value: Option<&Tag>) -> Option<&[Tag]> {
+        match value? {
+            Tag::List(values) => Some(values),
+            Tag::ByteArray(values) if values.is_empty() => Some(&[]),
+            Tag::IntArray(values) if values.is_empty() => Some(&[]),
+            Tag::LongArray(values) if values.is_empty() => Some(&[]),
+            _ => None,
+        }
+    }
+    let (Some(a), Some(b)) = (keys(a), keys(b)) else {
+        return false;
+    };
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|(a, b)| identifier_equal(Some(a), Some(b)))
 }
 
 fn block_entity_equal(a: Option<&Tag>, b: Option<&Tag>) -> bool {

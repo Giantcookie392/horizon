@@ -33,6 +33,7 @@ pub const DECODED_COMPONENTS: &[&str] = &[
     "minecraft:custom_name",
     "minecraft:item_name",
     "minecraft:item_model",
+    "minecraft:recipes",
     "minecraft:block_entity_data",
 ];
 
@@ -44,7 +45,10 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
         return Ok(value.clone());
     }
     if id == "minecraft:item_model" {
-        return item_model(value);
+        return identifier_value(value);
+    }
+    if id == "minecraft:recipes" {
+        return recipes(value);
     }
     decode_component(id, value, reg)?;
     if id == "minecraft:block_entity_data" {
@@ -121,7 +125,8 @@ pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), Strin
         },
         "minecraft:enchantments" | "minecraft:stored_enchantments" => enchantment_map(t, reg),
         "minecraft:custom_name" | "minecraft:item_name" => super::component::decode(t),
-        "minecraft:item_model" => item_model(t).map(|_| ()),
+        "minecraft:item_model" => identifier_value(t).map(|_| ()),
+        "minecraft:recipes" => recipes(t).map(|_| ()),
         // TypedEntityData.codec: the type is the compound's id.
         "minecraft:block_entity_data" => match t {
             Tag::Compound(c) => match c.get(&"id".into()) {
@@ -149,8 +154,8 @@ pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), Strin
     }
 }
 
-/// `DataComponents.ITEM_MODEL`: `Identifier.CODEC`, without a resource lookup.
-fn item_model(value: &Tag) -> Result<Tag, String> {
+/// `Identifier.CODEC`, shared by `ITEM_MODEL` and recipe resource keys.
+fn identifier_value(value: &Tag) -> Result<Tag, String> {
     let Tag::String(value) = value else {
         return Err("Not a string".into());
     };
@@ -159,6 +164,30 @@ fn item_model(value: &Tag) -> Result<Tag, String> {
     let id = horizon_core::identifier::Identifier::parse(&text)
         .map_err(|error| format!("Not a valid resource location: {text} {error}"))?;
     Ok(Tag::String(id.to_string().as_str().into()))
+}
+
+/// `DataComponents.RECIPES`: `Recipe.KEY_CODEC.listOf()`.
+/// Resource keys do not require a registry lookup; list order and duplicates survive.
+fn recipes(value: &Tag) -> Result<Tag, String> {
+    let values = match value {
+        Tag::List(values) => values.as_slice(),
+        // NbtOps.getList accepts every CollectionTag, including empty numeric arrays.
+        Tag::ByteArray(values) if values.is_empty() => &[],
+        Tag::IntArray(values) if values.is_empty() => &[],
+        Tag::LongArray(values) if values.is_empty() => &[],
+        Tag::ByteArray(_) | Tag::IntArray(_) | Tag::LongArray(_) => {
+            return Err("Not a string".into());
+        }
+        _ => return Err("Not a list".into()),
+    };
+    if values.len() > i32::MAX as usize {
+        return Err("Recipe list exceeds the codec size limit".into());
+    }
+    values
+        .iter()
+        .map(identifier_value)
+        .collect::<Result<Vec<_>, _>>()
+        .map(Tag::List)
 }
 /// `ItemEnchantments.CODEC`: registry keys and boxed-number levels in 1..=255.
 /// `UnboundedMapCodec` reports failed entries; commands do not retain its partial map.
