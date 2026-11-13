@@ -1016,7 +1016,7 @@ impl Step {
             | Self::BackedUp(_) => (Stage::Prepare, None),
             Self::Tools { done, total, .. } => (
                 Stage::Prepare,
-                (*total > 0).then(|| *done as f32 / *total as f32),
+                (*total > 0).then_some(*done as f32 / *total as f32),
             ),
             Self::Compile { done, total, .. } => (
                 Stage::Compile,

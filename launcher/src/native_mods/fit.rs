@@ -75,7 +75,8 @@ pub(super) fn judge(
     let Some(table) = table(&project.bundle.dir).filter(|table| table.made_for == made_for) else {
         return Ok(Verdict::NoList { made_for });
     };
-    if let Fit::DoesNotFit(misfits) = uses::fits(&table.entries, &surface()?) {
+    let target = surface()?;
+    if let Fit::DoesNotFit(misfits) = uses::fits(&table.entries, target.as_ref()) {
         return Ok(Verdict::DoesNotFit { made_for, misfits });
     }
     if !project.bundle.manifest.inject.is_empty() {

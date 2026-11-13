@@ -108,7 +108,6 @@
     "launcher/src/tailscale.rs login.tailscale.com",
     "launcher/src/tailscale.rs tailscale.com",
     "crates/cargo-horizon-mod/src/internals.rs github.com",
-    "crates/cargo-horizon-mod/src/main.rs api.github.com",
     "crates/horizon-client-render/src/mods_screen.rs bugs.mojang.com",
     "crates/horizon-client-render/src/mods_screen.rs github.com",
     "crates/horizon-client-render/src/mods_screen.rs minecraft.net",

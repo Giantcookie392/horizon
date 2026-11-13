@@ -15,6 +15,7 @@ bin-dir = "{ bin }{ binary-ext }"
 pkg-fmt = "tgz"
 
 [dependencies]
+horizon-addresses = { path = "../horizon-addresses" }
 horizon-mod-source = { path = "../horizon-mod-source" }
 cap-std = "3.4.6"
 # `canonicalize` that keeps plain Windows paths (no verbatim prefix), as `cargo metadata` prints them.

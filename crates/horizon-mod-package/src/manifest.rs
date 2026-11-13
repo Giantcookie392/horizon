@@ -1519,11 +1519,10 @@ capabilities = ["registries"]
             zip.write_all(bytes).unwrap();
         }
         let mut archive = zip::ZipArchive::new(zip.finish().unwrap()).unwrap();
-        assert!(
-            Package::read_zip(&mut archive)
-                .unwrap_err()
-                .contains(USES_FILE)
-        );
+        let error = Package::read_zip(&mut archive)
+            .err()
+            .expect("a content package's uses.json is refused");
+        assert!(error.contains(USES_FILE), "{error}");
     }
 
     #[test]
@@ -1623,9 +1622,12 @@ capabilities = ["registries"]
         assert!(zip.by_name(".git/hooks/pre-commit").is_err());
         assert!(zip.by_name("target/generated/bad.rs").is_err());
         assert!(
-            zip.file_names().all(|name| !name.starts_with(".horizon")),
+            zip.file_names_raw()
+                .all(|name| !name.starts_with(b".horizon")),
             "{:?}",
-            zip.file_names().collect::<Vec<_>>()
+            zip.file_names_raw()
+                .map(String::from_utf8_lossy)
+                .collect::<Vec<_>>()
         );
         assert!(!source_file(
             ".horizon/sdk/api/crates/horizon-mod-api/src/lib.rs"

@@ -49,6 +49,10 @@ fn index_of(files: &[(&str, &[u8])], rust: &str) -> Index {
         content_api: horizon_mod_package::manifest::API.into(),
         surface: Surface {
             hash: "ab".repeat(16),
+            previous: None,
+            source: None,
+            changes: Vec::new(),
+            notes: Vec::new(),
         },
         mixins: Mixins {
             rev: horizon_mod_package::mixins_tool::REV.into(),

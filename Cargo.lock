@@ -511,6 +511,7 @@ dependencies = [
  "base64 0.22.1",
  "cap-std",
  "dunce",
+ "horizon-addresses",
  "horizon-mod-package",
  "horizon-mod-point-emit",
  "horizon-mod-source",

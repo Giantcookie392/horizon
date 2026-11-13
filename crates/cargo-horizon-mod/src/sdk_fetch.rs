@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 /// The SDK's folder in a project.
 pub(crate) const DIR: &str = ".horizon/sdk";
 /// The releases' base, when `HORIZON_SDK_BASE` names none.
-const BASE: &str = "https://github.com/arismoko/horizon/releases/download";
+const BASE: &str = horizon_addresses::SDK_RELEASES;
 /// The file naming the build a folder holds, written last: a folder without it is not one.
 const STAMP: &str = "build";
 const SURFACE: &str = "surface.json";
@@ -236,11 +236,8 @@ impl Base {
                 .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
                 .collect()),
             Self::Url(base) if base == BASE => {
-                let api = format!(
-                    "https://api.github.com/repos/{}/releases?per_page=100",
-                    native::PREBUILT_REPO
-                );
-                let text = ureq::get(&api)
+                let api = horizon_addresses::SDK_RELEASE_LIST;
+                let text = ureq::get(api)
                     .call()
                     .map_err(|e| format!("{api}: {e}"))?
                     .into_string()
@@ -275,11 +272,10 @@ pub(crate) fn fetch(
         let index = Index::read(&bytes, build).map_err(|e| format!("{tag}: {e}"))?;
         return Ok(pinned(&index, dir));
     }
-    match fs::remove_dir_all(dir) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-            return Err(format!("{}: {e}", dir.display()));
-        }
-        _ => {}
+    if let Err(e) = fs::remove_dir_all(dir)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        return Err(format!("{}: {e}", dir.display()));
     }
     fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let sums = base.read(&tag, horizon_release_sign::SUMS, SMALL)?;

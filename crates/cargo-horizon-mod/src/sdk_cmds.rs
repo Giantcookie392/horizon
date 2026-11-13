@@ -494,6 +494,9 @@ pub(crate) fn check_mod(entry: ChildEntry, args: &[String]) -> Result<(), String
         println!("{}: the package rules hold.", package.manifest.name);
         return Ok(());
     }
+    // The mod's `horizon-mod-api` is a path into `.horizon/sdk/`: fetch it before Cargo looks.
+    let sdk = ensure_sdk(root)?;
+    let surface = surface_of(&sdk)?;
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     for target in [None, Some("wasm32-unknown-unknown")] {
         let mut command = Command::new(&cargo);
@@ -507,8 +510,6 @@ pub(crate) fn check_mod(entry: ChildEntry, args: &[String]) -> Result<(), String
             return Err(format!("cargo check for {on} failed"));
         }
     }
-    let sdk = ensure_sdk(root)?;
-    let surface = surface_of(&sdk)?;
     match uses_table::scan(entry, root, &surface)? {
         Scanned::Uses(uses) => {
             print!(

@@ -92,11 +92,15 @@ fn main() -> ExitCode {
             .and_then(|()| build(entry))
             .map(|p| println!("Built {}", p.display())),
         Some("wasm-std") => wasm::wasm_std(&args[1..]),
-        Some("build") => code_project(Path::new("."))
-            .then(|| fetched(Path::new(".")))
-            .unwrap_or(Ok(()))
-            .and_then(|()| build(entry))
-            .map(|p| println!("Built {}", p.display())),
+        Some("build") => {
+            let sdk = if code_project(Path::new(".")) {
+                fetched(Path::new("."))
+            } else {
+                Ok(())
+            };
+            sdk.and_then(|()| build(entry))
+                .map(|p| println!("Built {}", p.display()))
+        }
         Some("run") => run(&args[1..]).map_err(|e| e.to_string()),
         Some("check") if args.get(1).is_none_or(|a| a.starts_with("--")) => {
             sdk_cmds::check_mod(entry, &args[1..])
