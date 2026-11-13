@@ -8,7 +8,7 @@ use std::{
 };
 use syn::Item;
 
-/// A source file of the game's crates, with its module path and the `cfg`s it is compiled under.
+/// A source file of a crate, with its module path and the `cfg`s it is compiled under.
 #[derive(Clone)]
 pub struct ModuleFile {
     pub module: String,
@@ -40,11 +40,17 @@ pub fn test_only(attrs: &[syn::Attribute]) -> bool {
 /// A module file still to read: its module path, file, children's folder and conditions.
 type Pending = (String, PathBuf, PathBuf, Vec<String>);
 
+/// The files of the module `module`, read from `path` (its children in `dir`), following `mod`
+/// declarations (and `#[path]`s, and inline modules that declare files), each read with `parse`.
+/// With `every_build`, a module behind a `cfg` is left out with everything under it; without, it
+/// is kept with its conditions. Test-only modules are always left out, including files gated by
+/// inner attributes.
 pub fn walk_module_files(
     module: String,
     path: PathBuf,
     dir: PathBuf,
     every_build: bool,
+    parse: impl Fn(&Path, &str) -> Result<syn::File, String>,
 ) -> Result<Vec<ModuleFile>, String> {
     let mut files = Vec::new();
     let mut pending = vec![(module, path, dir, Vec::new())];
@@ -55,7 +61,7 @@ pub fn walk_module_files(
             continue;
         }
         let source = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let file = crate::game_modules::parse(&path, &source)?;
+        let file = parse(&path, &source)?;
         if test_only(&file.attrs) || (every_build && gated(&file.attrs)) {
             continue;
         }

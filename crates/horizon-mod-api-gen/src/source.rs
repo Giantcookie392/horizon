@@ -2,7 +2,7 @@
 //! and the `cfg`s they are compiled under, following `mod` declarations, `#[path]`s and inline
 //! modules.
 
-use mod_source::modules::{ModuleFile, conditions, gated, test_only, walk_module_files};
+use mod_source::modules::{ModuleFile, walk_module_files};
 use quote::ToTokens;
 use std::{
     cell::RefCell,
@@ -10,13 +10,11 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
-use syn::{Item, Type};
+use syn::Type;
 
-/// The files of the module `module`, read from `path` (its children in `dir`), following `mod`
-/// declarations (and `#[path]`s, and inline modules that declare files). With `every_build`, a
-/// module behind a `cfg` is left out with everything under it (the replaceable functions: those every build
-/// compiles); without, it is kept with its conditions (the internals, listed with the builds they
-/// exist in). Test-only modules are always left out, including files gated by inner attributes.
+/// The files of the game's module `module` ([`walk_module_files`]), each parsed with the game's
+/// generated module lists expanded. With `every_build`, the replaceable functions: those every
+/// build compiles; without, the internals, listed with the builds they exist in.
 pub(crate) fn module_files(
     module: String,
     path: PathBuf,
@@ -27,7 +25,7 @@ pub(crate) fn module_files(
     if let Some(files) = WALKS.with(|walks| walks.borrow().as_ref()?.get(&key).cloned()) {
         return Ok(files);
     }
-    let files = walk_module_files(module, path, dir, every_build)?;
+    let files = walk_module_files(module, path, dir, every_build, crate::game_modules::parse)?;
     WALKS.with(|walks| {
         if let Some(walks) = walks.borrow_mut().as_mut() {
             walks.insert(key, files.clone());
