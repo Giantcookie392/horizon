@@ -116,7 +116,7 @@ impl Float<'_> {
     /// Canonical persistent representation, allocated only at load time.
     pub fn to_tag(self) -> Tag {
         match self {
-            Self::Constant(value) => Tag::Float(value),
+            Self::Constant(value) => Tag::Float(value.to_bits()),
             Self::Reference(key) => key.to_tag(),
         }
     }
@@ -141,7 +141,10 @@ mod tests {
             int(&Tag::Long(4_294_967_297)).unwrap().to_tag(),
             Tag::Int(1)
         );
-        assert_eq!(int(&Tag::Double(f64::NAN)).unwrap().to_tag(), Tag::Int(0));
+        assert_eq!(
+            int(&Tag::Double(f64::NAN.to_bits())).unwrap().to_tag(),
+            Tag::Int(0)
+        );
         assert_eq!(
             int(&Tag::String("provider/path".into())).unwrap().to_tag(),
             Tag::String("minecraft:provider/path".into())
@@ -156,15 +159,17 @@ mod tests {
             assert_eq!(int(&a).unwrap(), int(&b).unwrap());
             assert_eq!(float(&a).unwrap(), float(&b).unwrap());
         }
-        let zero = Tag::Float(0.0);
-        let negative_zero = Tag::Double(-0.0);
+        let zero = Tag::Float(0.0_f32.to_bits());
+        let negative_zero = Tag::Double((-0.0_f64).to_bits());
         assert_ne!(float(&zero).unwrap(), float(&negative_zero).unwrap());
-        let nan = Tag::Float(f32::NAN);
-        let other_nan = Tag::Double(f64::from_bits(0x7ff8_0000_0000_0001));
+        let nan = Tag::Float(f32::NAN.to_bits());
+        let other_nan = Tag::Double(0x7ff8_0000_0000_0001);
         assert_eq!(float(&nan).unwrap(), float(&other_nan).unwrap());
         assert_eq!(
-            float(&Tag::Double(f64::INFINITY)).unwrap().to_tag(),
-            Tag::Float(f32::INFINITY)
+            float(&Tag::Double(f64::INFINITY.to_bits()))
+                .unwrap()
+                .to_tag(),
+            Tag::Float(f32::INFINITY.to_bits())
         );
         for value in [
             Tag::String("UPPER:path".into()),
