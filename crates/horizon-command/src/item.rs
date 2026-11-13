@@ -33,6 +33,7 @@ pub const DECODED_COMPONENTS: &[&str] = &[
     "minecraft:custom_name",
     "minecraft:item_name",
     "minecraft:block_entity_data",
+    "minecraft:fox/variant",
 ];
 
 /// Validate and decode a component into the value representation shared with stacks.
@@ -104,17 +105,9 @@ pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), Strin
             }
             Ok(())
         }
-        "minecraft:rarity" => match t {
-            Tag::String(s) => {
-                let s = s.to_string_lossy();
-                if ["common", "uncommon", "rare", "epic"].contains(&s.as_str()) {
-                    Ok(())
-                } else {
-                    Err(format!("Unknown element name:{s}"))
-                }
-            }
-            _ => Err("Not a string".into()),
-        },
+        "minecraft:rarity" => string_enum(t, &["common", "uncommon", "rare", "epic"]),
+        // Fox.Variant.CODEC uses StringRepresentable names under ordinary NbtOps.
+        "minecraft:fox/variant" => string_enum(t, &["red", "snow"]),
         "minecraft:enchantments" | "minecraft:stored_enchantments" => enchantment_map(t, reg),
         "minecraft:custom_name" | "minecraft:item_name" => super::component::decode(t),
         // TypedEntityData.codec: the type is the compound's id.
@@ -141,6 +134,21 @@ pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), Strin
             _ => Ok(()),
         },
         _ => Ok(()),
+    }
+}
+
+/// `StringRepresentable.StringRepresentableCodec`: exact names, not network ordinals.
+fn string_enum(t: &Tag, names: &[&str]) -> Result<(), String> {
+    let Tag::String(value) = t else {
+        return Err("Not a string".into());
+    };
+    if names
+        .iter()
+        .any(|name| value.0.iter().copied().eq(name.encode_utf16()))
+    {
+        Ok(())
+    } else {
+        Err(format!("Unknown element name:{}", value.to_string_lossy()))
     }
 }
 /// `ItemEnchantments.CODEC`: registry keys and boxed-number levels in 1..=255.
@@ -729,6 +737,52 @@ pub fn suggest_predicate(builder: &mut SuggestionsBuilder, reg: &Registries) {
 #[cfg(test)]
 mod tests {
     use super::decode_component;
+
+    #[test]
+    fn fox_variant_codec_accepts_only_exact_persistent_names() {
+        use super::{Registries, Tag, decoded_component_value};
+        use horizon_core::nbt::JavaString;
+        let registry = Registries::default();
+        for name in ["red", "snow"] {
+            let value = Tag::String(name.into());
+            assert_eq!(
+                decoded_component_value("minecraft:fox/variant", &value, &registry),
+                Ok(value)
+            );
+        }
+        for value in [
+            Tag::Byte(0),
+            Tag::Int(1),
+            Tag::Double(1.0f64.to_bits()),
+            Tag::List(vec![]),
+            Tag::compound([] as [(&str, Tag); 0]),
+        ] {
+            assert_eq!(
+                decoded_component_value("minecraft:fox/variant", &value, &registry),
+                Err("Not a string".into())
+            );
+        }
+        for name in ["", "RED", "Snow", "minecraft:red", "arctic", "red "] {
+            assert_eq!(
+                decoded_component_value(
+                    "minecraft:fox/variant",
+                    &Tag::String(name.into()),
+                    &registry
+                ),
+                Err(format!("Unknown element name:{name}"))
+            );
+        }
+        for units in [vec![0xd800], vec![114, 101, 100, 0xdc00]] {
+            assert!(
+                decoded_component_value(
+                    "minecraft:fox/variant",
+                    &Tag::String(JavaString(units)),
+                    &registry
+                )
+                .is_err()
+            );
+        }
+    }
 
     #[test]
     fn decoded_component_values_use_codec_numbers_and_retain_stored_values() {
