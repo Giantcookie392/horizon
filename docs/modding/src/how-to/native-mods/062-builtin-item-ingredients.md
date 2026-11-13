@@ -54,14 +54,20 @@ Native registrations retain their persistent NBT validation contract.
 
 The shared decoder currently covers `damage`, `repair_cost`, `max_damage`,
 `max_stack_size`, `rarity`, `enchantments`, `stored_enchantments`, `custom_name`,
-`enchantment_glint_override`, `item_name`, and `block_entity_data` in the
-`minecraft` namespace. The other 111 registered built-ins use stored-value matching
+`enchantment_glint_override`, `food`, `item_name`, and `block_entity_data` in the
+`minecraft` namespace. The other 110 registered built-ins use stored-value matching
 while their shared decoders are added incrementally in **#3875**. Their absence is
 not a load refusal.
 
 `enchantment_glint_override` accepts booleans and all numeric NBT widths, as
 `Codec.BOOL` with `NbtOps` does: zero (including negative zero) is false;
 nonzero values, fractions and NaN are true. Displays retain canonical byte 0 or 1.
+
+`food` requires non-negative `nutrition` (Java integer conversion) and numeric
+`saturation` (32-bit float, including negative and nonfinite values).
+`can_always_eat` defaults to false and uses the same numeric boolean rules.
+Unknown fields, including legacy food effects, are ignored. Float equality treats
+all NaNs as equal but distinguishes positive and negative zero.
 
 Component ingredient displays contain the patch, including removals. Difference
 lists retain the base list and remove only items whose default stack passes the
