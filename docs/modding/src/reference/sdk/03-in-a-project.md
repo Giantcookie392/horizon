@@ -44,14 +44,14 @@ that has one.
 
 ## `.horizon/sdk/`
 
-`new`, `build`, `build --wasm`, `hooks`, `fits`, `update` and `check` fetch the pinned build's SDK into
-`.horizon/sdk/` when the folder is missing or holds another build, after the [checks](01-release.md#how-a-download-is-checked).
+In a code mod, `new`, `build`, `build --wasm`, `check`, `hooks`, `fits` and `update` fetch the pinned build's SDK
+into `.horizon/sdk/` when the folder is missing or holds another build, after the [checks](01-release.md#how-a-download-is-checked).
 It holds `sdk.json`, `surface.json`, the unpacked API source under `api/`, and `build`, a file naming the build. That
 file is written last, so a fetch that stopped partway is fetched again by the next command.
 
-A fresh clone of a mod works after `build` or `hooks`, for example. `check` runs `cargo check` before it fetches, so
-on a fresh clone it fails until one of the others has run. An editor needs that first command too: until it runs,
-`horizon-mod-api`'s path does not exist.
+`fits` and `update` fetch nothing for a mod made for exactly one build: its manifest says so before any SDK is
+needed. Any of these commands makes a fresh clone of a mod work, `check` included, since it fetches before Cargo
+reads the path. An editor needs that first command too: until it runs, `horizon-mod-api`'s path does not exist.
 
 `sdk diff`, `fits` and `update` read other builds' small files (`sdk.json` and `surface.json`) into
 `.horizon/cache/<build id>/`, with the same checks.

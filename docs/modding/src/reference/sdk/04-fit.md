@@ -37,8 +37,8 @@ contract, as for any library.
 
 ## `uses.json`
 
-`cargo horizon-mod build` packs `uses.json` beside `horizon-mod.toml` in every code mod's package, except a mod that
-is exact by nature, or one whose source the scan cannot judge (the build says so and packs none). The list holds
+`cargo horizon-mod build` packs `uses.json` beside `horizon-mod.toml` in every code mod's package, except a mod with
+a `[native.*]` table or an `internals` list, or one whose source the scan cannot judge (the build says so and packs none). The list holds
 every surface item whose name occurs as an identifier in the mod's source or that its manifest names, then every
 item those items' signatures reference, transitively. A member counts only when its owner is reached. How the scan
 reads source, and what it counts as doubt, is in
