@@ -615,7 +615,7 @@ def smoke(out: Path) -> None:
         "sha256": sha256(installed / library), "kind": "mod", "mod": "smoke", "identity": build}]}))
     if holder_mark() not in (installed / EXECUTABLE).read_bytes():
         sys.exit("smoke: holder capability missing from the executable")
-    for library in runtime_libraries(deps):
+    for library in runtime_libraries(out):
         shutil.copy2(library, installed / library.name)
     install_package(installed / "horizon-native-mods" / "smoke", starter.replace("{id}", "smoke"))
     # The same executable as shipped, with no native libraries selected.
@@ -623,7 +623,7 @@ def smoke(out: Path) -> None:
     if api.exists():
         shutil.rmtree(api)
     shutil.copytree(out / RUNTIME, api)
-    for library in runtime_libraries(deps):
+    for library in runtime_libraries(out):
         shutil.copy2(library, api / library.name)
     print(f"smoke: the starter mod and the game executable built against {out} alone, installed in {installed}")
 
@@ -645,10 +645,13 @@ def install_package(folder: Path, source: str) -> None:
     (folder / "src/lib.rs").write_text(source)
 
 
-def runtime_libraries(deps: Path) -> list[Path]:
-    """What the launcher installs beside the executable (launcher/src/native_mods/prebuilt.rs `runtime_libraries`):
-    the game's shared libraries, std, and on Windows the MinGW runtime the GNU DLLs import."""
-    libraries = [path for path in deps.iterdir() if path.suffix in (".so", ".dll", ".dylib")]
+def runtime_libraries(out: Path) -> list[Path]:
+    """What the launcher installs beside the executable (launcher/src/native_mods/prebuilt.rs `runtime_libraries`),
+    by the same rule: every shared library the identity's `runtime` slice records under `deps/`, std, and on Windows
+    the MinGW runtime the GNU DLLs import. So `start` fails when the record misses a library the game loads."""
+    runtime = json.loads((out / IDENTITY).read_text())["slices"]["runtime"]
+    libraries = [out / name for name in runtime
+                 if name.startswith("deps/") and name.endswith((".so", ".dll", ".dylib"))]
     libdir = Path(run(["rustc", "--print", "target-libdir"]).strip())
     libraries += [path for path in libdir.iterdir()
                   if path.name.startswith(("libstd-", "std-")) and path.suffix in (".so", ".dll", ".dylib")]
