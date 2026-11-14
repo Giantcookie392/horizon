@@ -192,6 +192,7 @@ pub(super) fn json_patch(data: &serde_json::Map<String, Value>) -> Option<Compou
         let optional: &[&str] = match component {
             "weapon" => &["item_damage_per_attack", "disable_blocking_for_seconds"],
             "food" => &["can_always_eat"],
+            "custom_model_data" => &["floats", "flags", "strings", "colors"],
             "use_cooldown" => &["cooldown_group"],
             _ => &[],
         };

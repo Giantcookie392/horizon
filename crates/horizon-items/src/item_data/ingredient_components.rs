@@ -40,6 +40,14 @@ pub fn removed(stack: &ItemStack, id: &str) -> bool {
 /// Presence is checked by the caller, so empty decoded enchantment maps compare equal.
 pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
     match id {
+        "minecraft:recipes" => recipe_keys_equal(
+            a.data().and_then(|d| d.other(id)),
+            b.data().and_then(|d| d.other(id)),
+        ),
+        "minecraft:mob_visibility" => mob_visibility_equal(
+            a.data().and_then(|d| d.other(id)),
+            b.data().and_then(|d| d.other(id)),
+        ),
         "minecraft:cooking_fuel" => super::cooking_fuel::equal(
             a.data().and_then(|d| d.other(id)),
             b.data().and_then(|d| d.other(id)),
@@ -78,6 +86,15 @@ pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
             a.data().map_or(0, |d| d.repair_cost) == b.data().map_or(0, |d| d.repair_cost)
         }
         "minecraft:dyed_color" => dyed_color(a).is_some_and(|color| Some(color) == dyed_color(b)),
+        "minecraft:custom_model_data" => {
+            match (
+                a.data().and_then(|data| data.other(id)),
+                b.data().and_then(|data| data.other(id)),
+            ) {
+                (Some(a), Some(b)) => custom_model_data::equal(a, b),
+                _ => false,
+            }
+        }
         "minecraft:enchantments" => levels_equal(
             a.data().map_or(&[], |d| d.enchantments.as_slice()),
             b.data().map_or(&[], |d| d.enchantments.as_slice()),
@@ -179,8 +196,12 @@ pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
         "minecraft:rarity" => rarity(a) == rarity(b),
         "minecraft:ominous_bottle_amplifier" => ominous_amplifier(a) == ominous_amplifier(b),
         // DyeColor.CODEC's canonical NbtOps value is its exact serialized name.
-        // Live stacks retain dye in `other`; borrow UTF-16 without palette scans.
-        "minecraft:dye" => match (
+        // Live stacks retain these colors in `other`; borrow UTF-16 without palette scans.
+        "minecraft:dye"
+        | "minecraft:wolf/collar"
+        | "minecraft:cat/collar"
+        | "minecraft:shulker/color"
+        | "minecraft:sheep/color" => match (
             a.data().and_then(|d| d.other(id)),
             b.data().and_then(|d| d.other(id)),
         ) {
@@ -410,6 +431,65 @@ fn identifier_equal(a: Option<&Tag>, b: Option<&Tag>) -> bool {
     units(a).eq(units(b))
 }
 
+/// `MobVisibility.CODEC`: required holder set and inclusive boxed-float range.
+/// Registry references are resolved against the load context, never a built-in whitelist.
+pub fn decode_mob_visibility(
+    value: &Tag,
+    registry: &horizon_client_core::registries::Registries,
+) -> Result<Tag, String> {
+    let parsed = MobVisibility::parse(value)
+        .ok_or("Invalid mob_visibility fields or visibility outside [0;10]")?;
+    let targets =
+        super::component_values::holder_set(parsed.targets, "minecraft:entity_type", registry)?;
+    Ok(Tag::compound([
+        ("targeting_entity_types", targets),
+        ("visibility", Tag::Float(parsed.visibility.to_bits())),
+    ]))
+}
+
+struct MobVisibility<'a> {
+    targets: &'a Tag,
+    visibility: f32,
+}
+
+impl<'a> MobVisibility<'a> {
+    /// Borrow live persistent storage, accepting compact singleton holder sets.
+    fn parse(value: &'a Tag) -> Option<Self> {
+        let Tag::Compound(_) = value else { return None };
+        let targets = value.get("targeting_entity_types")?;
+        let visibility = match value.get("visibility")? {
+            Tag::Byte(v) => f32::from(*v),
+            Tag::Short(v) => f32::from(*v),
+            Tag::Int(v) => *v as f32,
+            Tag::Long(v) => *v as f32,
+            Tag::Float(v) => f32::from_bits(*v),
+            Tag::Double(v) => f64::from_bits(*v) as f32,
+            _ => return None,
+        };
+        // Float.compareTo distinguishes negative zero and orders NaN above 10.
+        if !visibility.is_finite() || visibility.is_sign_negative() || visibility > 10.0 {
+            return None;
+        }
+        Some(Self {
+            targets,
+            visibility,
+        })
+    }
+}
+
+fn mob_visibility_equal(a: Option<&Tag>, b: Option<&Tag>) -> bool {
+    let (Some(a), Some(b)) = (
+        a.and_then(MobVisibility::parse),
+        b.and_then(MobVisibility::parse),
+    ) else {
+        return false;
+    };
+    if a.visibility.to_bits() != b.visibility.to_bits() {
+        return false;
+    }
+    super::component_values::holder_set_equal(a.targets, b.targets)
+}
+
 fn block_entity_equal(a: Option<&Tag>, b: Option<&Tag>) -> bool {
     let (Some(Tag::Compound(a)), Some(Tag::Compound(b))) = (a, b) else {
         return a == b;
@@ -464,6 +544,25 @@ fn text_value(tag: &Tag) -> &Tag {
     } else {
         tag
     }
+}
+
+fn recipe_keys_equal(a: Option<&Tag>, b: Option<&Tag>) -> bool {
+    fn keys(value: Option<&Tag>) -> Option<&[Tag]> {
+        match value? {
+            Tag::List(values) => Some(values),
+            Tag::ByteArray(values) if values.is_empty() => Some(&[]),
+            Tag::IntArray(values) if values.is_empty() => Some(&[]),
+            Tag::LongArray(values) if values.is_empty() => Some(&[]),
+            _ => None,
+        }
+    }
+    let (Some(a), Some(b)) = (keys(a), keys(b)) else {
+        return false;
+    };
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|(a, b)| identifier_equal(Some(a), Some(b)))
 }
 
 #[cfg(test)]
