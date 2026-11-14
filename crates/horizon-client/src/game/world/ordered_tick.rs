@@ -307,6 +307,7 @@ impl Game<'_> {
         if events && let Err(e) = self.process_level_events() {
             first_error.get_or_insert(e);
         }
+        self.entity_sections_stepped(super::entity_sections::Family::Ordered);
         first_error.map_or(Ok(()), Err)
     }
 

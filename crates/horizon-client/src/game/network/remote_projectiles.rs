@@ -793,7 +793,7 @@ impl Game<'_> {
             let w = self.mob_world_base(&[]);
             let world = super::creatures::ProjWorld {
                 w: &w,
-                targets: &[],
+                targets: Vec::new(),
                 border: Some(self.border.bounds()),
             };
             projectiles.for_each_mut(|p| match p.kind {

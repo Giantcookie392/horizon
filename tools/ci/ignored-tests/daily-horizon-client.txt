@@ -6,7 +6,6 @@ horizon-client game::commands::modprofile::tests::modprofile_state_and_report_si
 horizon-client game::commands::selector_bounds_tests::actual_selector_uses_body_overlap_but_distance_stays_at_the_origin lib daily game-boot
 horizon-client game::commands::world_cmds::allay_owner_damage_tests::allay_owner_adapters_compare_the_actual_player_uuid lib daily game-boot
 horizon-client game::dedicated::tests::console_logging_survives_closed_stdout lib daily child-process
-horizon-client game::entity_sections::tests::a_real_mob_tick_tells_inside_each_position_write lib daily resources
 horizon-client game::explosion_detonate::tests::a_nested_blast_keeps_its_own_spared lib daily game-boot
 horizon-client game::explosion_detonate::tests::a_position_taken_out_keeps_its_block lib daily game-boot
 horizon-client game::explosion_detonate::tests::an_added_entity_is_hurt_and_an_empty_handle_is_refused lib daily game-boot
@@ -43,6 +42,7 @@ horizon-client game::server_reload::tests::datapack_publication_tests::data_map_
 horizon-client game::server_reload::tests::datapack_publication_tests::datapack_game_open_reload_and_exhaustion_are_atomic lib daily game-boot
 horizon-client game::server_reload::tests::datapack_publication_tests::refused_reload_names_the_pack_and_keeps_the_old_generation lib daily game-boot
 horizon-client game::server_reload::tests::datapack_publication_tests::remote_reload_never_decodes_local_registry_files lib daily game-boot
+horizon-client game::split::players::tests::offline_guests_join_only_local_servers lib daily network
 horizon-client game::stats::phantom_spawn_tests::no_phantoms_under_a_roof_the_sky_light_does_not_reach lib daily game-boot
 horizon-client game::stats::phantom_spawn_tests::phantoms_spawn_under_a_glass_roof lib daily game-boot
 horizon-client game::tnt::tests::h13201_a_dispensed_potion_is_a_level_entity lib daily game-boot
