@@ -658,7 +658,6 @@ impl Game<'_> {
         &mut self,
         stack: &functions::PackStack,
         root: &std::path::Path,
-        data_switched: bool,
     ) -> Result<PreparedWorldReload> {
         let (tables, health, datapack_registries) = self.stage_world_tables(stack, true, root)?;
         let items = tables
