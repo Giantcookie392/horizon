@@ -1788,3 +1788,262 @@ fn mob_visibility_component_recipe_codec_and_borrowed_matching() {
     ));
 }
 
+#[test]
+fn recipes_component_cooking_decodes_keys_and_matches_without_allocations() {
+    use crate::crafting::Recipes;
+    use horizon_world::loot::PackOverlay;
+    use serde_json::json;
+
+    let mut items = Items::empty();
+    items.component_defaults = std::sync::Arc::new(std::collections::HashMap::from([(
+        "minecraft:knowledge_book".into(),
+        crate::json_nbt::json_to_compound(
+            json!({"minecraft:recipes":["minecraft:unregistered/path","fixture:custom","unregistered/path","minecraft:"]})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap(),
+    )]));
+    let load = load();
+    let context = load.loop_context(LoopSide::Server, []);
+    let root = tempfile::tempdir().unwrap();
+    let ingredient = |payload: serde_json::Value, strict| {
+        json!({"type":"neoforge:components","items":"minecraft:knowledge_book",
+            "components":{"minecraft:recipes":payload},"strict":strict})
+    };
+    let recipe = |ingredient: serde_json::Value| {
+        json!({"type":"minecraft:smelting","ingredient":ingredient,
+            "result":{"id":"minecraft:diamond"},"experience":0.0,"cookingtime":20})
+    };
+    let valid = ingredient(
+        json!([
+            "unregistered/path",
+            "fixture:custom",
+            ":unregistered/path",
+            ""
+        ]),
+        false,
+    );
+    let mut sources = vec![("fixture:recipes".into(), recipe(valid.clone()))];
+    for (index, payload) in [
+        json!("unregistered/path"),
+        json!({}),
+        json!({"recipes":[]}),
+        json!([{"id":"minecraft:stone"}]),
+        json!([5]),
+        json!([0.5]),
+        json!(["valid", "Minecraft:invalid"]),
+        json!(["minecraft:Uppercase"]),
+        json!(["bad namespace:path"]),
+        json!(["..:path"]),
+        json!(["a:b:c"]),
+        json!(["#minecraft:tag"]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let invalid = ingredient(payload, false);
+        assert!(Ingredient::parse(&invalid, &items).is_none());
+        let rule = IngredientRule::Components {
+            patch: crate::json_nbt::json_to_compound(invalid["components"].as_object().unwrap())
+                .unwrap(),
+            removed: Vec::new(),
+            strict: false,
+        };
+        let error = components::validate(&rule, &items).unwrap_err();
+        assert!(error.contains("component minecraft:recipes:"), "{error}");
+        sources.push((format!("fixture:refused_{index}"), recipe(invalid)));
+    }
+    let recipes =
+        Recipes::from_sources(root.path(), &items, &PackOverlay::NONE, sources, &load).unwrap();
+    let check = |recipes: &Recipes, stack: &ItemStack, expected| {
+        // Build the cooking index once; only candidate matching is allocation-free.
+        let _ = recipes.cook(&context, "minecraft:smelting", stack);
+        let (found, allocations) = horizon_threads::allocation_probe::measure(|| {
+            recipes.cook(&context, "minecraft:smelting", stack)
+        });
+        assert_eq!(allocations.calls, 0, "{allocations:?}");
+        assert_eq!(found.is_some(), expected);
+        if let Some(found) = found {
+            assert_eq!(found.id, "fixture:recipes");
+            assert_eq!(found.result.item.as_ref(), "minecraft:diamond");
+        }
+    };
+    let mut stack = ItemStack::new("minecraft:knowledge_book", 1);
+    check(&recipes, &stack, true);
+    assert_eq!(
+        recipes.cooking.len(),
+        1,
+        "invalid recipes alone are omitted"
+    );
+    let parsed = Ingredient::parse(&valid, &items).unwrap();
+    assert_eq!(
+        parsed.shown.as_ref().unwrap()[0]
+            .data()
+            .unwrap()
+            .other("minecraft:recipes"),
+        Some(&Tag::List(vec![
+            Tag::String("minecraft:unregistered/path".into()),
+            Tag::String("fixture:custom".into()),
+            Tag::String("minecraft:unregistered/path".into()),
+            Tag::String("minecraft:".into()),
+        ])),
+    );
+    for (payload, matches) in [
+        (
+            json!([
+                "unregistered/path",
+                "fixture:custom",
+                ":unregistered/path",
+                ":"
+            ]),
+            true,
+        ),
+        (
+            json!([
+                "minecraft:unregistered/path",
+                "fixture:custom",
+                "unregistered/path",
+                "minecraft:"
+            ]),
+            true,
+        ),
+        (
+            json!([
+                "fixture:custom",
+                "unregistered/path",
+                "unregistered/path",
+                ""
+            ]),
+            false,
+        ),
+        (json!(["unregistered/path", "fixture:custom", ""]), false),
+        (
+            json!([
+                "unregistered/path",
+                "fixture:custom",
+                "unregistered/path",
+                "",
+                "extra"
+            ]),
+            false,
+        ),
+        (
+            json!([
+                "unregistered/path",
+                "fixture:other",
+                "unregistered/path",
+                ""
+            ]),
+            false,
+        ),
+        (
+            json!([
+                "Minecraft:unregistered/path",
+                "fixture:custom",
+                "unregistered/path",
+                ""
+            ]),
+            false,
+        ),
+        (json!([]), false),
+        (json!([{"id":"unregistered/path"}]), false),
+    ] {
+        let value = crate::json_nbt::json_to_tag(&payload).unwrap();
+        stack
+            .data_mut()
+            .set_loot_component("minecraft:recipes", &Some(value));
+        check(&recipes, &stack, matches);
+    }
+    let load_one = |ingredient| {
+        Recipes::from_sources(
+            root.path(),
+            &items,
+            &PackOverlay::NONE,
+            vec![("fixture:recipes".into(), recipe(ingredient))],
+            &load,
+        )
+        .unwrap()
+    };
+    stack
+        .data_mut()
+        .set_loot_component("minecraft:recipes", &None);
+    let strict = load_one(ingredient(
+        json!([
+            "unregistered/path",
+            "fixture:custom",
+            "unregistered/path",
+            "minecraft:"
+        ]),
+        true,
+    ));
+    check(&strict, &stack, true);
+    stack.data_mut().set_other(
+        "minecraft:custom_data",
+        Some(Tag::compound([] as [(&str, Tag); 0])),
+    );
+    check(&strict, &stack, false);
+    check(&recipes, &stack, true);
+    stack.data_mut().set_other("minecraft:custom_data", None);
+    stack.data_mut().set_other(
+        "!minecraft:recipes",
+        Some(Tag::compound([] as [(&str, Tag); 0])),
+    );
+    check(&recipes, &stack, false);
+    let absent = load_one(
+        json!({"type":"neoforge:components","items":"minecraft:knowledge_book",
+        "components":{"!minecraft:recipes":{}}}),
+    );
+    check(&absent, &stack, true);
+    stack.data_mut().set_other("!minecraft:recipes", None);
+    check(&absent, &stack, false);
+    let empty = load_one(ingredient(json!([]), false));
+    check(&empty, &stack, false);
+    for value in [
+        Tag::List(vec![]),
+        Tag::ByteArray(vec![]),
+        Tag::IntArray(vec![]),
+        Tag::LongArray(vec![]),
+    ] {
+        assert_eq!(
+            horizon_command::item::decoded_component_value(
+                "minecraft:recipes",
+                &value,
+                &items.component_registry,
+            )
+            .unwrap(),
+            Tag::List(vec![]),
+        );
+        stack
+            .data_mut()
+            .set_loot_component("minecraft:recipes", &Some(value));
+        check(&empty, &stack, true);
+        check(&absent, &stack, false);
+    }
+    for value in [
+        Tag::ByteArray(vec![0]),
+        Tag::IntArray(vec![0]),
+        Tag::LongArray(vec![0]),
+        Tag::List(vec![Tag::String(horizon_core::nbt::JavaString(vec![
+            0xd800,
+        ]))]),
+        Tag::List(vec![Tag::String(horizon_core::nbt::JavaString(vec![
+            0xdc00,
+        ]))]),
+        Tag::List(vec![Tag::String(horizon_core::nbt::JavaString(vec![
+            0xd83d, 0xde00,
+        ]))]),
+    ] {
+        assert!(
+            horizon_command::item::decoded_component_value(
+                "minecraft:recipes",
+                &value,
+                &items.component_registry,
+            )
+            .is_err(),
+        );
+    }
+    stack.count = 0;
+    check(&empty, &stack, false);
+}
+

@@ -24,6 +24,7 @@ fn int_of(t: &Tag) -> Option<i64> {
 }
 /// Built-ins with an implemented shared component payload decoder.
 pub const DECODED_COMPONENTS: &[&str] = &[
+    "minecraft:recipes",
     "minecraft:mob_visibility",
     "minecraft:custom_model_data",
     "minecraft:wolf/collar",
@@ -70,7 +71,7 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
         return potion_duration_scale(value).map(|value| Tag::Float(value.to_bits()));
     }
     if id == "minecraft:item_model" {
-        return item_model(value);
+        return identifier_value(value);
     }
     if id == "minecraft:food" {
         let food = horizon_items::item_data::food_properties(value).map_err(str::to_owned)?;
@@ -99,6 +100,7 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
     }
     if id == "minecraft:custom_model_data" { return horizon_items::item_data::custom_model_data::decode(value).ok_or_else(|| "Expected custom model data record".into()); }
     if id == "minecraft:mob_visibility" { return horizon_items::item_data::ingredient_components::decode_mob_visibility(value,reg); }
+    if id == "minecraft:recipes" { return recipes(value); }
     decode_component(id, value, reg)?;
     if id == "minecraft:block_entity_data" {
         let Tag::Compound(_) = value else {
@@ -161,6 +163,7 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
 /// The codecs of the item components commands commonly set.
 pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), String> {
     match id {
+        "minecraft:recipes" => recipes(t).map(|_|()),
         "minecraft:mob_visibility" => horizon_items::item_data::ingredient_components::decode_mob_visibility(t,reg).map(|_|()),
         "minecraft:custom_model_data" => horizon_items::item_data::custom_model_data::valid(t).then_some(()).ok_or_else(|| "Expected custom model data record".into()),
         // DyeColor.CODEC -> StringRepresentable.fromEnum: ordinary NbtOps uses
@@ -261,7 +264,7 @@ pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), Strin
             .map(|_| ())
             .ok_or_else(|| "Not a number".into()),
         "minecraft:custom_name" | "minecraft:item_name" => super::component::decode(t),
-        "minecraft:item_model" => item_model(t).map(|_| ()),
+        "minecraft:item_model" => identifier_value(t).map(|_| ()),
         // TypedEntityData.codec: the type is the compound's id.
         "minecraft:block_entity_data" => match t {
             Tag::Compound(c) => match c.get(&"id".into()) {
@@ -308,7 +311,7 @@ fn potion_duration_scale(t: &Tag) -> Result<f32, String> {
     }
 }
 /// `DataComponents.ITEM_MODEL`: `Identifier.CODEC`, without a resource lookup.
-fn item_model(value: &Tag) -> Result<Tag, String> {
+fn identifier_value(value: &Tag) -> Result<Tag, String> {
     let Tag::String(value) = value else {
         return Err("Not a string".into());
     };
@@ -345,7 +348,7 @@ fn use_cooldown(value: &Tag) -> Result<Tag, String> {
     let mut record = Compound::new();
     record.insert("seconds".into(), Tag::Float(seconds.to_bits()));
     if let Some(group) = group {
-        record.insert("cooldown_group".into(), item_model(group)?);
+        record.insert("cooldown_group".into(), identifier_value(group)?);
     }
     Ok(Tag::Compound(record))
 }
@@ -360,6 +363,27 @@ fn block_state(value: &Tag) -> Result<(), String> {
         return Err("Not a string".into());
     }
     Ok(())
+}
+fn recipes(value: &Tag) -> Result<Tag, String> {
+    let values = match value {
+        Tag::List(values) => values.as_slice(),
+        // NbtOps.getList accepts every CollectionTag, including empty numeric arrays.
+        Tag::ByteArray(values) if values.is_empty() => &[],
+        Tag::IntArray(values) if values.is_empty() => &[],
+        Tag::LongArray(values) if values.is_empty() => &[],
+        Tag::ByteArray(_) | Tag::IntArray(_) | Tag::LongArray(_) => {
+            return Err("Not a string".into());
+        }
+        _ => return Err("Not a list".into()),
+    };
+    if values.len() > i32::MAX as usize {
+        return Err("Recipe list exceeds the codec size limit".into());
+    }
+    values
+        .iter()
+        .map(identifier_value)
+        .collect::<Result<Vec<_>, _>>()
+        .map(Tag::List)
 }
 fn enchantment_map(t: &Tag, reg: &Registries) -> Result<(), String> {
     let Tag::Compound(map) = t else {

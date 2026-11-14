@@ -40,6 +40,7 @@ pub fn removed(stack: &ItemStack, id: &str) -> bool {
 /// Presence is checked by the caller, so empty decoded enchantment maps compare equal.
 pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
     match id {
+        "minecraft:recipes" => recipe_keys_equal(a.data().and_then(|d|d.other(id)),b.data().and_then(|d|d.other(id))),
         "minecraft:mob_visibility" => mob_visibility_equal(a.data().and_then(|d|d.other(id)),b.data().and_then(|d|d.other(id))),
         "minecraft:cooking_fuel" => super::cooking_fuel::equal(
             a.data().and_then(|d| d.other(id)),
@@ -561,4 +562,23 @@ mod tests {
         b.data_mut().enchantments[0].1 = 3;
         assert!(!component_equal("minecraft:enchantments", &a, &b));
     }
+}
+
+fn recipe_keys_equal(a: Option<&Tag>, b: Option<&Tag>) -> bool {
+    fn keys(value: Option<&Tag>) -> Option<&[Tag]> {
+        match value? {
+            Tag::List(values) => Some(values),
+            Tag::ByteArray(values) if values.is_empty() => Some(&[]),
+            Tag::IntArray(values) if values.is_empty() => Some(&[]),
+            Tag::LongArray(values) if values.is_empty() => Some(&[]),
+            _ => None,
+        }
+    }
+    let (Some(a), Some(b)) = (keys(a), keys(b)) else {
+        return false;
+    };
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|(a, b)| identifier_equal(Some(a), Some(b)))
 }
