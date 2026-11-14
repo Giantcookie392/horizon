@@ -340,3 +340,378 @@ fn item_model_component_literals_decode_validate_and_match() {
         );
     }
 }
+
+#[test]
+fn mob_visibility_component_recipe_codec_and_borrowed_matching() {
+    let id = "minecraft:mob_visibility";
+    let mut items = Items::empty();
+    let registry = std::sync::Arc::make_mut(&mut items.component_registry);
+    let entities = registry
+        .by_registry
+        .entry("minecraft:entity_type".into())
+        .or_default();
+    entities.ids = vec!["minecraft:zombie".into(), "fixture:observer".into()];
+    entities.tags = vec!["fixture:observers".into()];
+    let default =
+        serde_json::json!({"targeting_entity_types":"zombie","visibility":0.5,"ignored":true});
+    items.component_defaults = std::sync::Arc::new(std::collections::HashMap::from([(
+        "minecraft:stick".into(),
+        crate::json_nbt::json_to_compound(serde_json::json!({id:default}).as_object().unwrap())
+            .unwrap(),
+    )]));
+    let load = load();
+    let context = load.loop_context(LoopSide::Server, []);
+    let root = tempfile::tempdir().unwrap();
+    let ingredient = |payload: Value, strict: bool| {
+        serde_json::json!({
+            "type":"neoforge:components","items":"minecraft:stick",
+            "components":{id:payload},"strict":strict
+        })
+    };
+    let recipe = |ingredient: Value| {
+        serde_json::json!({
+            "type":"minecraft:crafting_shapeless","ingredients":[ingredient],
+            "result":{"id":"minecraft:diamond"}
+        })
+    };
+    let valid = [
+        serde_json::json!({"targeting_entity_types":[":zombie"],"visibility":0.5}),
+        serde_json::json!({"targeting_entity_types":"#fixture:observers","visibility":10}),
+        serde_json::json!({"targeting_entity_types":[],"visibility":0}),
+        serde_json::json!({"targeting_entity_types":["fixture:observer","zombie","zombie"],"visibility":1}),
+    ];
+    let invalid = [
+        serde_json::json!({}),
+        serde_json::json!({"targeting_entity_types":"zombie"}),
+        serde_json::json!({"visibility":1}),
+        serde_json::json!({"targeting_entity_types":"missing","visibility":1}),
+        serde_json::json!({"targeting_entity_types":"#fixture:missing","visibility":1}),
+        serde_json::json!({"targeting_entity_types":["#fixture:observers"],"visibility":1}),
+        serde_json::json!({"targeting_entity_types":{"id":"zombie"},"visibility":1}),
+        serde_json::json!({"targeting_entity_types":"Zombie","visibility":1}),
+        serde_json::json!({"targeting_entity_types":["zombie",4],"visibility":1}),
+        serde_json::json!({"targeting_entity_types":[],"visibility":-0.5}),
+        serde_json::json!({"targeting_entity_types":[],"visibility":10.1}),
+        serde_json::json!({"targeting_entity_types":[],"visibility":"1"}),
+    ];
+    let mut sources = Vec::new();
+    for (index, payload) in valid.iter().enumerate() {
+        sources.push((
+            format!("fixture:valid_{index}"),
+            recipe(ingredient(payload.clone(), true)),
+        ));
+    }
+    for (index, payload) in invalid.iter().enumerate() {
+        let value = ingredient(payload.clone(), false);
+        assert!(Ingredient::parse(&value, &items).is_none());
+        let rule = IngredientRule::Components {
+            patch: crate::json_nbt::json_to_compound(value["components"].as_object().unwrap())
+                .unwrap(),
+            removed: Vec::new(),
+            strict: false,
+        };
+        let error = components::validate(&rule, &items).unwrap_err();
+        assert!(
+            error.contains("component minecraft:mob_visibility:"),
+            "{error}"
+        );
+        sources.push((format!("fixture:invalid_{index}"), recipe(value)));
+    }
+    sources.push((
+        "fixture:unrelated".into(),
+        recipe(serde_json::json!("minecraft:apple")),
+    ));
+    let recipes = crate::crafting::Recipes::from_sources(
+        root.path(),
+        &items,
+        &horizon_world::loot::PackOverlay::NONE,
+        sources,
+        &load,
+    )
+    .unwrap();
+    assert!(recipes.recipe_matches(
+        &context,
+        "fixture:unrelated",
+        &[Some(ItemStack::new("minecraft:apple", 1))],
+        1
+    ));
+    for index in 0..invalid.len() {
+        assert!(
+            !recipes
+                .crafting
+                .iter()
+                .any(|(name, _)| name == &format!("fixture:invalid_{index}"))
+        );
+    }
+    let mut stack = ItemStack::new("minecraft:stick", 1);
+    assert!(recipes.recipe_matches(&context, "fixture:valid_0", &[Some(stack.clone())], 1));
+    for (index, payload) in valid.iter().enumerate() {
+        let tag = crate::json_nbt::json_to_tag(payload).unwrap();
+        stack.data_mut().set_loot_component(id, &Some(tag));
+        assert!(recipes.recipe_matches(
+            &context,
+            &format!("fixture:valid_{index}"),
+            &[Some(stack.clone())],
+            1
+        ));
+        let compiled = Ingredient::parse(&ingredient(payload.clone(), true), &items).unwrap();
+        let (_, allocations) = horizon_threads::allocation_probe::measure(|| {
+            assert!(compiled.test_in(&context, &stack));
+        });
+        assert_eq!(allocations.calls, 0, "{allocations:?}");
+    }
+    // Direct holder order and duplicates are significant; named sets are not lists.
+    for payload in [
+        serde_json::json!({"targeting_entity_types":["zombie","fixture:observer","zombie"],"visibility":1}),
+        serde_json::json!({"targeting_entity_types":["fixture:observer","zombie"],"visibility":1}),
+        serde_json::json!({"targeting_entity_types":["fixture:observer","zombie","zombie"],"visibility":0.5}),
+        serde_json::json!({"targeting_entity_types":"#fixture:observers","visibility":1}),
+    ] {
+        stack
+            .data_mut()
+            .set_loot_component(id, &Some(crate::json_nbt::json_to_tag(&payload).unwrap()));
+        assert!(!recipes.recipe_matches(&context, "fixture:valid_3", &[Some(stack.clone())], 1));
+    }
+    stack.data_mut().set_loot_component(id, &None);
+    assert!(recipes.recipe_matches(&context, "fixture:valid_0", &[Some(stack.clone())], 1));
+    stack
+        .data_mut()
+        .set_loot_component("minecraft:item_model", &Some(Tag::String("stick".into())));
+    assert!(!recipes.recipe_matches(&context, "fixture:valid_0", &[Some(stack.clone())], 1));
+    let loose = Ingredient::parse(&ingredient(valid[0].clone(), false), &items).unwrap();
+    assert!(loose.test_in(&context, &stack));
+    let removal = Ingredient::parse(
+        &serde_json::json!({
+            "type":"neoforge:components","items":"minecraft:stick",
+            "components":{"!minecraft:mob_visibility":{}}
+        }),
+        &items,
+    )
+    .unwrap();
+    assert!(!removal.test_in(&context, &stack));
+    let patch = Tag::compound([(
+        "!minecraft:mob_visibility",
+        Tag::Compound(Default::default()),
+    )]);
+    (_, stack.extra) = crate::item_data::decode_components(Some(&patch));
+    assert!(removal.test_in(&context, &stack));
+    assert!(!loose.test_in(&context, &stack));
+    for value in [
+        Tag::Float((-0.0_f32).to_bits()),
+        Tag::Float(f32::NAN.to_bits()),
+        Tag::Float(f32::INFINITY.to_bits()),
+        Tag::Double(f64::NEG_INFINITY.to_bits()),
+    ] {
+        let payload = Tag::compound([
+            ("targeting_entity_types", Tag::List(Vec::new())),
+            ("visibility", value),
+        ]);
+        assert!(
+            horizon_command::item::decoded_component_value(id, &payload, &items.component_registry)
+                .is_err()
+        );
+    }
+    for units in [vec![0xd800], vec![0xdc00], vec![0xd83d, 0xde00]] {
+        let payload = Tag::compound([
+            (
+                "targeting_entity_types",
+                Tag::String(horizon_core::nbt::JavaString(units)),
+            ),
+            ("visibility", Tag::Int(1)),
+        ]);
+        assert!(
+            horizon_command::item::decoded_component_value(id, &payload, &items.component_registry)
+                .is_err()
+        );
+    }
+    // Java Number.floatValue narrows before validating; unknown fields are ignored.
+    let payload = Tag::compound([
+        ("targeting_entity_types", Tag::String(":zombie".into())),
+        ("visibility", Tag::Double(0.50000000001_f64.to_bits())),
+        ("ignored", Tag::Int(9)),
+    ]);
+    let canonical =
+        horizon_command::item::decoded_component_value(id, &payload, &items.component_registry)
+            .unwrap();
+    assert_eq!(
+        canonical.get("visibility"),
+        Some(&Tag::Float(0.5_f32.to_bits()))
+    );
+    stack = ItemStack::new("minecraft:stick", 1);
+    stack.data_mut().set_loot_component(id, &Some(payload));
+    let (_, allocations) = horizon_threads::allocation_probe::measure(|| {
+        assert!(loose.test_in(&context, &stack));
+    });
+    assert_eq!(allocations.calls, 0, "{allocations:?}");
+    for targets in [
+        Tag::ByteArray(Vec::new()),
+        Tag::IntArray(Vec::new()),
+        Tag::LongArray(Vec::new()),
+    ] {
+        let payload = Tag::compound([
+            ("targeting_entity_types", targets),
+            ("visibility", Tag::Byte(0)),
+        ]);
+        let canonical =
+            horizon_command::item::decoded_component_value(id, &payload, &items.component_registry)
+                .unwrap();
+        assert_eq!(
+            canonical.get("targeting_entity_types"),
+            Some(&Tag::List(Vec::new()))
+        );
+    }
+    for visibility in [
+        Tag::Byte(1),
+        Tag::Short(1),
+        Tag::Int(1),
+        Tag::Long(1),
+        Tag::Float(1.0_f32.to_bits()),
+        Tag::Double(1.0_f64.to_bits()),
+    ] {
+        let payload = Tag::compound([
+            (
+                "targeting_entity_types",
+                Tag::String("fixture:observer".into()),
+            ),
+            ("visibility", visibility),
+        ]);
+        let canonical =
+            horizon_command::item::decoded_component_value(id, &payload, &items.component_registry)
+                .unwrap();
+        assert_eq!(
+            canonical.get("visibility"),
+            Some(&Tag::Float(1.0_f32.to_bits()))
+        );
+    }
+    // Exercise the production catalog boundary: content entity rows plus the
+    // active pack's tags, then a fresh load after that registry snapshot changes.
+    std::fs::write(root.path().join("items.json"), r#"{"minecraft:stick":{}}"#).unwrap();
+    std::fs::write(
+        root.path().join("entity-types.json"),
+        r#"{"fixture:observer":{}}"#,
+    )
+    .unwrap();
+    let defaults = horizon_world::item_defaults::read(root.path()).unwrap();
+    let files = vec![(
+        "tags/fixture:entity_type/observers".into(),
+        vec![br#"{"values":["fixture:observer"]}"#.to_vec()],
+    )];
+    let overlay = horizon_world::loot::PackOverlay {
+        files: &files,
+        ..horizon_world::loot::PackOverlay::NONE
+    };
+    let active = Items::tags_only(root.path(), &overlay, &defaults).unwrap();
+    let custom = ingredient(
+        serde_json::json!({"targeting_entity_types":"fixture:observer","visibility":1}),
+        false,
+    );
+    let named = ingredient(
+        serde_json::json!({"targeting_entity_types":"#fixture:observers","visibility":1}),
+        false,
+    );
+    let active_recipes = crate::crafting::Recipes::from_sources(
+        root.path(),
+        &active,
+        &overlay,
+        vec![
+            ("fixture:custom".into(), recipe(custom.clone())),
+            ("fixture:named".into(), recipe(named.clone())),
+        ],
+        &load,
+    )
+    .unwrap();
+    let mut candidate = ItemStack::new("minecraft:stick", 1);
+    candidate.data_mut().set_loot_component(
+        id,
+        &Some(Tag::compound([
+            (
+                "targeting_entity_types",
+                Tag::String("fixture:observer".into()),
+            ),
+            ("visibility", Tag::Int(1)),
+        ])),
+    );
+    assert!(active_recipes.recipe_matches(
+        &context,
+        "fixture:custom",
+        &[Some(candidate.clone())],
+        1
+    ));
+    assert!(!active_recipes.recipe_matches(
+        &context,
+        "fixture:named",
+        &[Some(candidate.clone())],
+        1
+    ));
+    candidate.data_mut().set_loot_component(
+        id,
+        &Some(Tag::compound([
+            (
+                "targeting_entity_types",
+                Tag::String("#fixture:observers".into()),
+            ),
+            ("visibility", Tag::Int(1)),
+        ])),
+    );
+    assert!(active_recipes.recipe_matches(
+        &context,
+        "fixture:named",
+        &[Some(candidate.clone())],
+        1
+    ));
+    std::fs::write(
+        root.path().join("entity-types.json"),
+        r#"{"fixture:replacement":{}}"#,
+    )
+    .unwrap();
+    let refreshed = Items::tags_only(
+        root.path(),
+        &horizon_world::loot::PackOverlay::NONE,
+        &defaults,
+    )
+    .unwrap();
+    let replacement = ingredient(
+        serde_json::json!({"targeting_entity_types":"fixture:replacement","visibility":1}),
+        false,
+    );
+    let refreshed_recipes = crate::crafting::Recipes::from_sources(
+        root.path(),
+        &refreshed,
+        &horizon_world::loot::PackOverlay::NONE,
+        vec![
+            ("fixture:custom".into(), recipe(custom)),
+            ("fixture:named".into(), recipe(named)),
+            ("fixture:replacement".into(), recipe(replacement)),
+        ],
+        &load,
+    )
+    .unwrap();
+    candidate.data_mut().set_loot_component(
+        id,
+        &Some(Tag::compound([
+            (
+                "targeting_entity_types",
+                Tag::String("fixture:replacement".into()),
+            ),
+            ("visibility", Tag::Int(1)),
+        ])),
+    );
+    assert!(!refreshed_recipes.recipe_matches(
+        &context,
+        "fixture:custom",
+        &[Some(candidate.clone())],
+        1
+    ));
+    assert!(!refreshed_recipes.recipe_matches(
+        &context,
+        "fixture:named",
+        &[Some(candidate.clone())],
+        1
+    ));
+    assert!(refreshed_recipes.recipe_matches(
+        &context,
+        "fixture:replacement",
+        &[Some(candidate)],
+        1
+    ));
+}
