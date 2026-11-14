@@ -184,10 +184,48 @@ impl ComponentPredicate {
     }
 }
 
+/// JSON optional record fields treat null as absent before the strict NBT boundary.
+pub(super) fn json_patch(data: &serde_json::Map<String, Value>) -> Option<Compound> {
+    let mut normalized = None;
+    for (id, value) in data {
+        let optional: &[&str] = match id.strip_prefix("minecraft:").unwrap_or(id) {
+            "weapon" => &["item_damage_per_attack", "disable_blocking_for_seconds"],
+            "food" => &["can_always_eat"],
+            "use_cooldown" => &["cooldown_group"],
+            _ => &[],
+        };
+        if let Some(record) = value.as_object() {
+            for field in optional {
+                if record.get(*field).is_some_and(Value::is_null) {
+                    let patch = normalized.get_or_insert_with(|| data.clone());
+                    patch.get_mut(id)?.as_object_mut()?.remove(*field);
+                }
+            }
+        }
+    }
+    crate::json_nbt::json_to_compound(normalized.as_ref().unwrap_or(data)).ok()
+}
+
 pub(super) fn validate_recipe(value: &Value, items: &Items, recipe: &str) -> bool {
     match value {
         Value::Object(object) => match ingredient_kind(object) {
             Some("neoforge:components") => {
+                // Reject before integral JSON-to-NBT zero loses its sign.
+                if let Some(patch) = object.get("components").and_then(Value::as_object) {
+                    for id in ["minecraft:weapon", "weapon"] {
+                        if patch
+                            .get(id)
+                            .and_then(|v| v.get("disable_blocking_for_seconds"))
+                            .and_then(Value::as_f64)
+                            .is_some_and(|seconds| seconds == 0.0 && seconds.is_sign_negative())
+                        {
+                            log::warn!(
+                                "recipe {recipe} rejected: component minecraft:weapon: disable_blocking_for_seconds must not be negative zero"
+                            );
+                            return false;
+                        }
+                    }
+                }
                 let keys = object
                     .get("components")
                     .and_then(Value::as_object)
@@ -212,7 +250,7 @@ pub(super) fn validate_recipe(value: &Value, items: &Items, recipe: &str) -> boo
                     &items.item_tag_order,
                     &|_| None,
                     &resolved_items,
-                    &|data| crate::json_nbt::json_to_compound(data).ok(),
+                    &json_patch,
                 );
                 let result = parsed
                     .and_then(|parsed| parsed.rule)

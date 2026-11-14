@@ -1,6 +1,28 @@
 use super::*;
 
 #[test]
+fn cooking_fuel_zero_speed_is_valid_without_defaults_or_bounds() {
+    let items = Items::empty();
+    let value = Tag::compound([
+        ("burn_time", Tag::Int(-5)),
+        ("speed_multiplier", Tag::Int(0)),
+        ("ignored", Tag::String("anything".into())),
+    ]);
+    assert_eq!(
+        horizon_command::item::decoded_component_value(
+            "minecraft:cooking_fuel",
+            &value,
+            &items.component_registry
+        )
+        .unwrap(),
+        Tag::compound([
+            ("burn_time", Tag::Int(-5)),
+            ("speed_multiplier", Tag::Float(0))
+        ])
+    );
+}
+
+#[test]
 fn cooking_fuel_recipe_compiles_and_matches_decoded_live_and_prototype_values() {
     let mut items = Items::empty();
     items.component_defaults = std::sync::Arc::new(std::collections::HashMap::from([(
@@ -108,6 +130,17 @@ fn cooking_fuel_recipe_compiles_and_matches_decoded_live_and_prototype_values() 
     });
     assert_eq!(allocations.calls, 0, "{allocations:?}");
     assert_eq!(allocations.bytes, 0);
+    for malformed in [
+        Tag::End,
+        Tag::Byte(0),
+        Tag::List(vec![]),
+        Tag::compound([("burn_time", Tag::Int(10))]),
+    ] {
+        coal.data_mut()
+            .set_other("minecraft:cooking_fuel", Some(malformed));
+        assert!(!matches(&coal, "fixture:fuel_constant"));
+        assert!(!matches(&coal, "fixture:fuel_reference"));
+    }
     coal.data_mut().set_other("minecraft:cooking_fuel", None);
     coal.data_mut().set_other(
         "!minecraft:cooking_fuel",
@@ -236,6 +269,10 @@ fn brewing_fuel_codec_compiles_recipes_and_borrows_live_values() {
     assert_eq!(
         recipes.find(&context, &[Some(stack.clone())], 1).unwrap().0,
         "fixture:reference"
+    );
+    assert!(
+        !ingredient.test_in(&context, &stack),
+        "a reference is not a numeric constant"
     );
     let reference = Ingredient::parse(&reference, &items).unwrap();
     let (_, allocations) = horizon_threads::allocation_probe::measure(|| {
@@ -578,6 +615,13 @@ fn food_codec_compiles_recipes_and_matches_borrowed_values() {
     };
     let mut sources = vec![("fixture:food".into(), recipe(payload.clone()))];
     for (index, invalid) in [
+        json!(true),
+        json!(false),
+        json!(null),
+        json!("food"),
+        json!({"nutrition":"4","saturation":0}),
+        json!({"nutrition":4,"saturation":0,"can_always_eat":{}}),
+        json!({"nutrition":4,"saturation":0,"can_always_eat":[]}),
         json!({}),
         json!({"nutrition":4}),
         json!({"saturation":0}),
@@ -590,18 +634,33 @@ fn food_codec_compiles_recipes_and_matches_borrowed_values() {
     .enumerate()
     {
         let value = ingredient(invalid.clone());
+        let error = components::validate_recipe_components(&value, &items).unwrap_err();
+        assert!(error.contains("minecraft:food"), "{error}");
+        let reload = crate::crafting::Recipes::from_sources(
+            &std::env::temp_dir(),
+            &items,
+            &PackOverlay::NONE,
+            vec![
+                ("fixture:food".into(), recipe(payload.clone())),
+                ("fixture:invalid".into(), recipe(invalid.clone())),
+            ],
+            &load,
+        )
+        .unwrap();
+        assert_eq!(reload.crafting.len(), 1);
+        let grid = [Some(ItemStack::new("minecraft:apple", 1))];
+        assert!(reload.recipe_matches(&context, "fixture:food", &grid, 1));
+        assert!(reload.craft(&context, &grid, 1).is_some());
+        sources.push((format!("fixture:invalid_food_{index}"), recipe(invalid)));
+    }
+    for value in [Tag::End, Tag::Byte(0), Tag::List(vec![])] {
         let rule = IngredientRule::Components {
-            patch: crate::json_nbt::json_to_compound(value["components"].as_object().unwrap())
-                .unwrap(),
-            removed: Vec::new(),
+            patch: horizon_core::nbt::Compound::from([(COMPONENT.into(), value)]),
+            removed: vec![],
             strict: false,
         };
-        assert!(
-            components::validate(&rule, &items)
-                .unwrap_err()
-                .starts_with("component minecraft:food: "),
-        );
-        sources.push((format!("fixture:invalid_food_{index}"), recipe(invalid)));
+        let error = components::validate(&rule, &items).unwrap_err();
+        assert!(error.contains("minecraft:food"), "{error}");
     }
     let recipes = crate::crafting::Recipes::from_sources(
         &std::env::temp_dir(),
@@ -613,7 +672,7 @@ fn food_codec_compiles_recipes_and_matches_borrowed_values() {
     .unwrap();
     assert_eq!(recipes.crafting.len(), 1);
     assert_eq!(recipes.crafting[0].0, "fixture:food");
-    let parsed = Ingredient::parse(&ingredient(payload), &items).unwrap();
+    let parsed = Ingredient::parse(&ingredient(payload.clone()), &items).unwrap();
     assert_eq!(
         parsed.shown.as_ref().unwrap()[0]
             .data()
@@ -687,6 +746,37 @@ fn food_codec_compiles_recipes_and_matches_borrowed_values() {
         .set_loot_component("!minecraft:food", &Some(Tag::Compound(Default::default())));
     assert!(!recipes.recipe_matches(&context, "fixture:food", &grid, 1));
 
+    let absent = parse(
+        r#"{"type":"neoforge:components","items":["minecraft:apple","minecraft:paper"],"components":{"!minecraft:food":{}}}"#,
+        &items,
+    );
+    assert!(absent.test_in(&context, grid[0].as_ref().unwrap()));
+    assert!(!absent.test_in(&context, &ItemStack::new("minecraft:apple", 1)));
+    let source = json!({"type":"neoforge:components","items":"minecraft:paper",
+        "components":{"minecraft:food":payload},"strict":true});
+    let strict = Ingredient::parse(&source, &items).unwrap();
+    let mut relaxed_source = source.clone();
+    relaxed_source["strict"] = json!(false);
+    let relaxed = Ingredient::parse(&relaxed_source, &items).unwrap();
+    let mut paper = ItemStack::new("minecraft:paper", 1);
+    assert!(!strict.test_in(&context, &paper));
+    assert!(absent.test_in(&context, &paper));
+    paper.data_mut().set_other(
+        COMPONENT,
+        Some(Tag::compound([
+            ("nutrition", Tag::Int(4)),
+            ("saturation", Tag::Float((-2.5_f32).to_bits())),
+            ("ignored", Tag::String("not an extra component".into())),
+        ])),
+    );
+    assert!(strict.test_in(&context, &paper));
+    assert!(!absent.test_in(&context, &paper));
+    paper
+        .data_mut()
+        .set_other("minecraft:custom_data", Some(Tag::Int(7)));
+    assert!(!strict.test_in(&context, &paper));
+    assert!(relaxed.test_in(&context, &paper));
+
     // The direct float codec allows nonfinite values; record equality uses
     // Float.compare (canonical NaNs and distinct signed zero), not Rust ==.
     for (a, b, equal) in [
@@ -740,4 +830,3 @@ fn food_codec_compiles_recipes_and_matches_borrowed_values() {
         ]),
     );
 }
-

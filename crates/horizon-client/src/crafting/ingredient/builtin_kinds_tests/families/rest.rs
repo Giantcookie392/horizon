@@ -569,7 +569,7 @@ fn weapon_component_recipes_decode_defaults_and_match_live_borrowed_values() {
             ),
             (
                 "fixture:weapon_json_zero".into(),
-                // JsonOps converts this integer-valued spelling to an NBT zero.
+                // Weapon refuses negative zero before generic NBT conversion loses its sign.
                 recipe(ingredient(json!({"disable_blocking_for_seconds":-0.0}))),
             ),
             (
@@ -596,13 +596,13 @@ fn weapon_component_recipes_decode_defaults_and_match_live_borrowed_values() {
         &load,
     )
     .unwrap();
-    assert_eq!(recipes.crafting.len(), 4);
+    assert_eq!(recipes.crafting.len(), 3);
     let context = load.loop_context(LoopSide::Server, []);
     let matches =
         |id, stack: &ItemStack| recipes.recipe_matches(&context, id, &[Some(stack.clone())], 1);
     let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
     assert!(matches("fixture:weapon_default", &sword));
-    assert!(matches("fixture:weapon_json_zero", &sword));
+    assert!(!matches("fixture:weapon_json_zero", &sword));
     assert!(!matches("fixture:weapon_custom", &sword));
     sword.data_mut().set_loot_component(
         "minecraft:weapon",
@@ -633,8 +633,16 @@ fn weapon_component_recipes_decode_defaults_and_match_live_borrowed_values() {
         .data_mut()
         .set_loot_component("minecraft:custom_data", &Some(Tag::Int(7)));
     assert!(!matches("fixture:weapon_default", &sword));
-    let patch = Tag::compound([("!minecraft:weapon", Tag::Compound(Default::default()))]);
-    (_, sword.extra) = crate::item_data::decode_components(Some(&patch));
+    sword
+        .data_mut()
+        .set_loot_component("minecraft:weapon", &None);
+    sword
+        .data_mut()
+        .set_loot_component("minecraft:custom_data", &None);
+    sword.data_mut().set_loot_component(
+        "!minecraft:weapon",
+        &Some(Tag::Compound(Default::default())),
+    );
     assert!(!matches("fixture:weapon_default", &sword));
     assert!(matches("fixture:weapon_removed", &sword));
     assert!(!matches("fixture:weapon_invalid", &sword));
@@ -901,3 +909,274 @@ fn block_state_component_recipes_decode_validate_and_match() {
     }
 }
 
+#[test]
+fn weapon_recipe_rejections_preserve_siblings_and_presence_strictness() {
+    use serde_json::json;
+    let items = Items::empty();
+    let load = load();
+    let context = load.loop_context(LoopSide::Server, []);
+    let source = |payload| {
+        json!({"type":"neoforge:components","items":"minecraft:paper",
+        "components":{"minecraft:weapon":payload},"strict":true})
+    };
+    let recipe = |ingredient| json!({"type":"minecraft:crafting_shapeless","ingredients":[ingredient],"result":{"id":"minecraft:diamond"}});
+    for payload in [
+        json!(true),
+        json!(false),
+        json!(null),
+        json!("weapon"),
+        json!([]),
+        json!({"item_damage_per_attack":"1"}),
+        json!({"disable_blocking_for_seconds":false}),
+        json!({"disable_blocking_for_seconds":-0.0}),
+    ] {
+        let invalid = source(payload);
+        let error = components::validate_recipe_components(&invalid, &items).unwrap_err();
+        assert!(error.contains("minecraft:weapon"), "{error}");
+        let recipes = crate::crafting::Recipes::from_sources(
+            &std::env::temp_dir(),
+            &items,
+            &horizon_world::loot::PackOverlay::NONE,
+            vec![
+                ("fixture:invalid".into(), recipe(invalid)),
+                ("fixture:valid".into(), recipe(json!("minecraft:stick"))),
+            ],
+            &load,
+        )
+        .unwrap();
+        assert_eq!(recipes.crafting.len(), 1);
+        assert!(
+            recipes
+                .craft(&context, &[Some(ItemStack::new("minecraft:stick", 1))], 1)
+                .is_some()
+        );
+        assert!(
+            recipes
+                .craft(&context, &[Some(ItemStack::new("minecraft:paper", 1))], 1)
+                .is_none()
+        );
+    }
+    for value in [Tag::End, Tag::Byte(0), Tag::List(vec![])] {
+        let rule = IngredientRule::Components {
+            patch: horizon_core::nbt::Compound::from([("minecraft:weapon".into(), value)]),
+            removed: vec![],
+            strict: false,
+        };
+        let error = components::validate(&rule, &items).unwrap_err();
+        assert!(error.contains("minecraft:weapon"), "{error}");
+    }
+    let mut value = source(json!({"ignored":true}));
+    let strict = Ingredient::parse(&value, &items).unwrap();
+    value["strict"] = json!(false);
+    let relaxed = Ingredient::parse(&value, &items).unwrap();
+    let absent = parse(
+        r#"{"type":"neoforge:components","items":"minecraft:paper","components":{"!minecraft:weapon":{}}}"#,
+        &items,
+    );
+    let mut paper = ItemStack::new("minecraft:paper", 1);
+    assert!(!strict.test_in(&context, &paper));
+    assert!(absent.test_in(&context, &paper));
+    paper.data_mut().set_loot_component(
+        "minecraft:weapon",
+        &Some(Tag::compound([("unknown", Tag::Int(7))])),
+    );
+    assert!(strict.test_in(&context, &paper));
+    assert!(!absent.test_in(&context, &paper));
+    paper
+        .data_mut()
+        .set_other("minecraft:custom_data", Some(Tag::Int(1)));
+    assert!(!strict.test_in(&context, &paper));
+    assert!(relaxed.test_in(&context, &paper));
+    paper
+        .data_mut()
+        .set_loot_component("minecraft:weapon", &None);
+    paper.data_mut().set_loot_component(
+        "!minecraft:weapon",
+        &Some(Tag::Compound(Default::default())),
+    );
+    assert!(absent.test_in(&context, &paper));
+    assert!(!relaxed.test_in(&context, &paper));
+}
+
+#[test]
+fn next_component_codecs_reject_bad_records_preserve_siblings_and_presence() {
+    use serde_json::json;
+    let load = load();
+    let context = load.loop_context(LoopSide::Server, []);
+    for (id, valid, malformed) in [
+        (
+            "minecraft:compostable",
+            json!({"layers":1,"ignored":true}),
+            vec![json!({}), json!({"layers":null}), json!({"layers":false})],
+        ),
+        (
+            "minecraft:brewing_fuel",
+            json!({"uses":1,"speed_multiplier":2}),
+            vec![
+                json!({}),
+                json!({"uses":1}),
+                json!({"uses":null,"speed_multiplier":1}),
+            ],
+        ),
+        (
+            "minecraft:cooking_fuel",
+            json!({"burn_time":-5,"speed_multiplier":0}),
+            vec![
+                json!({}),
+                json!({"burn_time":1}),
+                json!({"burn_time":1,"speed_multiplier":null}),
+            ],
+        ),
+        (
+            "minecraft:use_cooldown",
+            json!({"seconds":1}),
+            vec![
+                json!({}),
+                json!({"seconds":null}),
+                json!({"seconds":0}),
+                json!({"seconds":-1}),
+                json!({"seconds":1e100}),
+                json!({"seconds":1,"cooldown_group":"bad group"}),
+            ],
+        ),
+        (
+            "minecraft:block_state",
+            json!({"axis":"x"}),
+            vec![
+                json!({"axis":null}),
+                json!({"axis":1}),
+                json!({"axis":true}),
+            ],
+        ),
+    ] {
+        let mut items = Items::empty();
+        let source = |payload| json!({"type":"neoforge:components","items":"minecraft:paper","components":{id:payload},"strict":true});
+        for payload in [json!(null), json!(false), json!(true), json!(0), json!([])]
+            .into_iter()
+            .chain(malformed)
+        {
+            let ingredient = source(payload);
+            let error = components::validate_recipe_components(&ingredient, &items).unwrap_err();
+            assert!(error.contains(id), "{error}");
+            let recipe = |ingredient| json!({"type":"minecraft:crafting_shapeless","ingredients":[ingredient],"result":{"id":"minecraft:diamond"}});
+            let recipes = crate::crafting::Recipes::from_sources(
+                &std::env::temp_dir(),
+                &items,
+                &horizon_world::loot::PackOverlay::NONE,
+                vec![
+                    ("fixture:invalid".into(), recipe(ingredient)),
+                    ("fixture:valid".into(), recipe(json!("minecraft:stick"))),
+                ],
+                &load,
+            )
+            .unwrap();
+            assert_eq!(recipes.crafting.len(), 1);
+            assert!(
+                recipes
+                    .craft(&context, &[Some(ItemStack::new("minecraft:stick", 1))], 1)
+                    .is_some()
+            );
+            assert!(
+                recipes
+                    .craft(&context, &[Some(ItemStack::new("minecraft:paper", 1))], 1)
+                    .is_none()
+            );
+        }
+        for value in [
+            Tag::End,
+            Tag::Byte(0),
+            Tag::List(vec![]),
+            Tag::String(horizon_core::nbt::JavaString(vec![0xd800])),
+        ] {
+            let rule = IngredientRule::Components {
+                patch: horizon_core::nbt::Compound::from([(id.into(), value)]),
+                removed: vec![],
+                strict: false,
+            };
+            let error = components::validate(&rule, &items).unwrap_err();
+            assert!(error.contains(id), "{error}");
+        }
+        let strict = Ingredient::parse(&source(valid.clone()), &items).unwrap();
+        let mut loose_source = source(valid.clone());
+        loose_source["strict"] = json!(false);
+        let loose = Ingredient::parse(&loose_source, &items).unwrap();
+        for malformed in [Tag::End, Tag::Byte(0), Tag::List(vec![])] {
+            let mut candidate = ItemStack::new("minecraft:paper", 1);
+            candidate.data_mut().set_other(id, Some(malformed));
+            assert!(!loose.test_in(&context, &candidate), "{id}");
+        }
+        let removal_id = format!("!{id}");
+        let absence_source = json!({"type":"neoforge:components","items":"minecraft:paper","components":{removal_id.clone():{}}});
+        let absent = Ingredient::parse(&absence_source, &items).unwrap();
+        let mut paper = ItemStack::new("minecraft:paper", 1);
+        assert!(!strict.test_in(&context, &paper));
+        assert!(absent.test_in(&context, &paper));
+        let patch = crate::json_nbt::json_to_compound(
+            source(valid.clone())["components"].as_object().unwrap(),
+        )
+        .unwrap();
+        let raw = patch.values().next().unwrap().clone();
+        paper.data_mut().set_other(id, Some(raw.clone()));
+        assert!(strict.test_in(&context, &paper));
+        assert!(!absent.test_in(&context, &paper));
+        paper
+            .data_mut()
+            .set_other("minecraft:custom_data", Some(Tag::Int(1)));
+        assert!(!strict.test_in(&context, &paper));
+        assert!(loose.test_in(&context, &paper));
+        items.component_defaults = std::sync::Arc::new(std::collections::HashMap::from([(
+            "minecraft:paper".into(),
+            patch,
+        )]));
+        let inherited = Ingredient::parse(&source(valid), &items).unwrap();
+        let inherited_absent = Ingredient::parse(&absence_source, &items).unwrap();
+        let mut paper = ItemStack::new("minecraft:paper", 1);
+        assert!(inherited.test_in(&context, &paper));
+        assert!(!inherited_absent.test_in(&context, &paper));
+        paper.data_mut().set_other(id, Some(raw));
+        paper.data_mut().set_loot_component(id, &None);
+        paper
+            .data_mut()
+            .set_loot_component(&removal_id, &Some(Tag::Compound(Default::default())));
+        assert!(!inherited.test_in(&context, &paper));
+        assert!(inherited_absent.test_in(&context, &paper));
+    }
+}
+
+#[test]
+fn optional_codec_json_null_uses_defaults_without_weakening_required_fields() {
+    use serde_json::json;
+    let items = Items::empty();
+    let load = load();
+    let root = tempfile::tempdir().unwrap();
+    for (id, payload, expected) in [
+        (
+            "minecraft:weapon",
+            json!({"item_damage_per_attack":null,"disable_blocking_for_seconds":null}),
+            json!({}),
+        ),
+        (
+            "minecraft:food",
+            json!({"nutrition":1,"saturation":0.5,"can_always_eat":null}),
+            json!({"nutrition":1,"saturation":0.5}),
+        ),
+        (
+            "minecraft:use_cooldown",
+            json!({"seconds":1,"cooldown_group":null}),
+            json!({"seconds":1}),
+        ),
+    ] {
+        let source = |value| json!({"type":"neoforge:components","items":"minecraft:paper","components":{id:value}});
+        let ingredient = Ingredient::parse(&source(payload.clone()), &items).unwrap();
+        let mut stack = ItemStack::new("minecraft:paper", 1);
+        stack
+            .data_mut()
+            .set_other(id, Some(crate::json_nbt::json_to_tag(&expected).unwrap()));
+        assert!(
+            ingredient.test_in(&load.loop_context(LoopSide::Server, []), &stack),
+            "{id}"
+        );
+        let recipes=crate::crafting::Recipes::from_sources(root.path(),&items,&horizon_world::loot::PackOverlay::NONE,vec![("fixture:optional_null".into(),json!({"type":"minecraft:crafting_shapeless","ingredients":[source(payload)],"result":{"id":"minecraft:diamond"}}))],&load).unwrap();
+        assert_eq!(recipes.crafting.len(), 1, "{id}");
+    }
+}

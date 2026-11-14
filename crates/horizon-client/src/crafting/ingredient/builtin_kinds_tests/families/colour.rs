@@ -147,4 +147,3 @@ fn components_dyed_color_decodes_rgb_forms_and_matches_borrowed_values() {
     assert!(!vector.test_in(&context, &removed));
     assert!(absence.test_in(&context, &ItemStack::new("minecraft:stick", 1)));
 }
-

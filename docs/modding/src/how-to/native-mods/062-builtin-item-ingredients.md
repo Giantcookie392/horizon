@@ -77,7 +77,7 @@ zero (including negative zero) is false; nonzero values, fractions and NaN are
 true. Displays retain canonical byte 0 or 1.
 `dyed_color` accepts packed integer colors or three numeric RGB channels,
 matching the decoded values without copying candidate payloads.
-The other 104 registered built-ins use stored-value matching while their shared
+The other 96 registered built-ins use stored-value matching while their shared
 decoders are added incrementally in **#3875**. Their absence is not a load refusal.
 
 Component ingredient displays contain the patch, including removals. Difference
@@ -89,3 +89,11 @@ A non-simple ingredient may have an empty default-stack display list and still
 load. It retains its full candidate set for concrete matching and cooking.
 For example, a diamond sword minus swords with damage 0 has no default display,
 but a damage-5 sword satisfies it. Empty display lists do not erase candidates.
+
+The decoded records also include `food`, `weapon`, `fox/variant`, `compostable`,
+`brewing_fuel`, `cooking_fuel`, `use_cooldown` and `block_state`. Fuel records
+require both fields without defaults or bounds. Cooldown requires positive finite
+seconds; its optional group is a valid identifier. Compostable requires layers.
+Block state is a string-to-string property map. Optional JSON record fields treat
+null as absent; required fields still refuse null. Weapon seconds refuse negative
+zero before JSON-to-NBT conversion.
