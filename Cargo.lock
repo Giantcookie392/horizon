@@ -1931,6 +1931,7 @@ dependencies = [
  "horizon-command",
  "horizon-core",
  "horizon-dualsense",
+ "horizon-game-discovery",
  "horizon-guest-stack",
  "horizon-hdr",
  "horizon-hooks",
