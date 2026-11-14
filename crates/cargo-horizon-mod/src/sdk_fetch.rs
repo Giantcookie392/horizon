@@ -84,25 +84,28 @@ pub(crate) fn pin(project: &Path) -> Result<String, String> {
 /// Pins the project at `project` to `build`, a full sha, and drops the SDK of the old pin: the
 /// next command fetches the new one.
 pub(crate) fn repin(project: &Path, build: &str) -> Result<(), String> {
-    let edit = |name: &str, set: &dyn Fn(&mut toml_edit::DocumentMut)| {
+    // The pin's own comment and spacing stay: only its value changes.
+    let edit = |name: &str, pin: &dyn Fn(&mut toml_edit::DocumentMut) -> &mut toml_edit::Item| {
         let path = project.join(name);
         let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let mut doc: toml_edit::DocumentMut = text
             .parse()
             .map_err(|e| format!("{}: {e}", path.display()))?;
-        set(&mut doc);
+        let item = pin(&mut doc);
+        match item.as_value_mut() {
+            Some(value) => crate::internals::set_string(value, build),
+            None => *item = toml_edit::value(build),
+        }
         fs::write(&path, doc.to_string()).map_err(|e| format!("{}: {e}", path.display()))
     };
     let manifest = Manifest::parse(
         &fs::read_to_string(project.join(MANIFEST)).map_err(|e| format!("{MANIFEST}: {e}"))?,
     )?;
     if manifest.native.is_some() {
-        edit(MANIFEST, &|doc: &mut toml_edit::DocumentMut| {
-            doc["native"]["horizon"] = toml_edit::value(build)
-        })?;
+        edit(MANIFEST, &|doc| &mut doc["native"]["horizon"])?;
     } else {
-        edit("Cargo.toml", &|doc: &mut toml_edit::DocumentMut| {
-            doc["package"]["metadata"]["horizon"]["sdk"] = toml_edit::value(build)
+        edit("Cargo.toml", &|doc| {
+            &mut doc["package"]["metadata"]["horizon"]["sdk"]
         })?;
     }
     match fs::remove_dir_all(project.join(DIR)) {

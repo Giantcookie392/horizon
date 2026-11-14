@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use horizon_mod_package::dependencies;
+use horizon_mod_package::mod_surface;
 
 mod api;
 mod api_route;
@@ -2091,6 +2092,7 @@ fn pipeline(
             &rust,
             game,
             &root().join("prebuilt-build"),
+            folder,
             route,
             &projects,
             &declared,
@@ -4175,7 +4177,7 @@ mod tests {
     /// A command that succeeds leaves its time in the build log; one that fails leaves none.
     #[cfg(unix)]
     #[test]
-    #[ignore = "starts child processes: runs in the daily ignored-test shards"]
+    #[ignore = "daily"]
     fn each_command_logs_its_time() {
         let _guard = TEST_STATE.lock().unwrap();
         clear_log().unwrap();

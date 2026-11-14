@@ -22,6 +22,7 @@ use super::prebuilt::{Package, Route};
 use super::Target;
 use crate::i18n::{tr, trf};
 use crate::rust_toolchain;
+use horizon_mod_package::mod_surface;
 use horizon_mod_package::sdk::{self, Asset, Index, Kind, Side, INDEX};
 use horizon_release_sign::{PublicKey, SIGNATURE, SIGNATURE_V2, SUMS};
 use std::collections::BTreeMap;

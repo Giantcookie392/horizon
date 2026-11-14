@@ -2903,7 +2903,6 @@ dependencies = [
  "horizon-mod-api-gen",
  "horizon-mod-package",
  "horizon-mod-point-emit",
- "horizon-mod-surface",
  "horizon-mod-vocab",
  "horizon-platform",
  "horizon-port-pack",

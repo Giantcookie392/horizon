@@ -282,6 +282,7 @@ impl Storage {
                 BuildCache::Rust
                     | BuildCache::Source
                     | BuildCache::Tools
+                    | BuildCache::PrebuiltOutput
                     | BuildCache::Prebuilt
                     | BuildCache::InternalsSync
             ) {
