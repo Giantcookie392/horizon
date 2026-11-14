@@ -35,6 +35,7 @@ horizon-client game::native_hooks::player_bed_leave::player_bed_leave_tests::gue
 horizon-client game::native_hooks::player_bed_leave::player_bed_leave_tests::guest_wake_counters_match_the_same_reasons_without_listeners lib daily game-boot
 horizon-client game::native_server::network_settings_tests::server_settings_follow_the_network_config lib daily slow
 horizon-client game::natural_spawning::tests::spawn_candidates_match_the_uncached_union_while_players_move lib daily slow
+horizon-client game::screen_render_phase_tests::chest_render_phases_cover_panel_but_preserve_items_tooltips_and_carried_stack lib daily resources # HORIZON_TEST_RESOURCES and software Vulkan required.
 horizon-client game::server_reload::tests::datapack_publication_tests::data_map_first_open_uses_staged_membership lib daily game-boot
 horizon-client game::server_reload::tests::datapack_publication_tests::data_map_later_enabled_layer_uses_staged_membership lib daily game-boot
 horizon-client game::server_reload::tests::datapack_publication_tests::data_map_reload_add_uses_staged_membership lib daily game-boot

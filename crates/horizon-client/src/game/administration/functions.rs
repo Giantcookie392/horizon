@@ -2263,13 +2263,8 @@ mod tests {
                     .tags
                     .contains(&"test:feature_marker".to_owned())
             );
-            (game.world_tables, game.health_resources) = game
-                .build_world_tables(
-                    &stack,
-                    false,
-                    &game.options.resources.clone(),
-                    game.mods.data_switched,
-                )
+            (game.world_tables, game.health_resources, _) = game
+                .stage_world_tables(&stack, false, &game.options.resources.clone())
                 .unwrap();
             assert!(game.items().item_tags["test:sample"].contains("minecraft:diamond"));
         });
@@ -2581,7 +2576,7 @@ mod tests {
 
     /// What a native mod contributes (`native_data_pack_files`) joins the load
     /// the tables are built from, a world's first open and `/reload` alike
-    /// (`Game::build_world_tables` is both), and sits below the world's own
+    /// (`Game::stage_world_tables` is both), and sits below the world's own
     /// packs. Each load asks again, so it is the current contribution that
     /// counts.
     #[test]

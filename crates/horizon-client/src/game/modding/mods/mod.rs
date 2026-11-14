@@ -103,7 +103,7 @@ pub(super) struct ModsState {
     pub(super) live_ids: std::collections::BTreeSet<String>,
     /// The server's data comes from a root a live switch built, not the one
     /// `res` was loaded from: the world tables are built from it even with no
-    /// data pack (`build_world_tables`).
+    /// data pack (`stage_world_tables`).
     pub(super) data_switched: bool,
     /// Structured load refusals, rendered only at the existing Mods-page boundary.
     pub(super) refused: Arc<Mutex<Vec<MissingJar>>>,

@@ -223,23 +223,11 @@ impl Game<'_> {
     /// Load the world's data packs' content tables (`None`: the world has no
     /// packs, and `Resources.rest` stays in use). This re-reads the tables,
     /// so it runs once per world open and on `/reload`.
-    #[cfg(test)]
-    pub(super) fn build_world_tables(
+    pub(super) fn stage_world_tables(
         &mut self,
         stack: &functions::PackStack,
         reload: bool,
         root: &std::path::Path,
-        _data_switched: bool,
-    ) -> Result<(Option<WorldTables>, horizon_client::health::HealthResources)> {
-        let (tables, health, _) = self.stage_world_tables(stack, reload, root, _data_switched)?;
-        Ok((tables, health))
-    }
-    fn stage_world_tables(
-        &mut self,
-        stack: &functions::PackStack,
-        reload: bool,
-        root: &std::path::Path,
-        _data_switched: bool,
     ) -> Result<(
         Option<WorldTables>,
         horizon_client::health::HealthResources,
@@ -444,8 +432,7 @@ impl Game<'_> {
     ) -> Result<()> {
         // A new world load: a saved base clamped into its bounds warns again (#3728).
         horizon_client::living_attributes::LOAD_CLAMPS.begin_load();
-        let (tables, health, registries) =
-            self.stage_world_tables(stack, false, root, self.mods.data_switched)?;
+        let (tables, health, registries) = self.stage_world_tables(stack, false, root)?;
         self.world_tables = tables;
         self.health_resources = health;
         self.mods.datapack_registries = registries.map(Arc::new);
@@ -673,8 +660,7 @@ impl Game<'_> {
         root: &std::path::Path,
         data_switched: bool,
     ) -> Result<PreparedWorldReload> {
-        let (tables, health, datapack_registries) =
-            self.stage_world_tables(stack, true, root, data_switched)?;
+        let (tables, health, datapack_registries) = self.stage_world_tables(stack, true, root)?;
         let items = tables
             .as_ref()
             .map_or_else(|| self.res.items(), |tables| &tables.items);
