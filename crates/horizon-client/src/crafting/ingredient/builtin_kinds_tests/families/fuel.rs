@@ -830,3 +830,4 @@ fn food_codec_compiles_recipes_and_matches_borrowed_values() {
         ]),
     );
 }
+

@@ -1191,3 +1191,4 @@ fn optional_codec_json_null_uses_defaults_without_weakening_required_fields() {
         assert_eq!(recipes.crafting.len(), 1, "{id}");
     }
 }
+

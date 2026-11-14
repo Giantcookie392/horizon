@@ -24,6 +24,7 @@ fn int_of(t: &Tag) -> Option<i64> {
 }
 /// Built-ins with an implemented shared component payload decoder.
 pub const DECODED_COMPONENTS: &[&str] = &[
+    "minecraft:sheep/color",
     "minecraft:dye",
     "minecraft:block_state",
     "minecraft:use_cooldown",
@@ -130,7 +131,7 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
         }
         // DyeColor.CODEC -> StringRepresentable.fromEnum: ordinary NbtOps uses
         // exact names, not the ordinal codec selected by compressMaps().
-        "minecraft:dye" => match t {
+        "minecraft:dye" | "minecraft:sheep/color" => match t {
             Tag::String(name) => {
                 if horizon_items::firework::DYE_FIREWORK_COLORS
                     .iter()

@@ -952,3 +952,4 @@ fn use_cooldown_literal_float_bounds_and_missing_seconds() {
         .is_err()
     );
 }
+
