@@ -546,6 +546,25 @@ fn text_value(tag: &Tag) -> &Tag {
     }
 }
 
+fn recipe_keys_equal(a: Option<&Tag>, b: Option<&Tag>) -> bool {
+    fn keys(value: Option<&Tag>) -> Option<&[Tag]> {
+        match value? {
+            Tag::List(values) => Some(values),
+            Tag::ByteArray(values) if values.is_empty() => Some(&[]),
+            Tag::IntArray(values) if values.is_empty() => Some(&[]),
+            Tag::LongArray(values) if values.is_empty() => Some(&[]),
+            _ => None,
+        }
+    }
+    let (Some(a), Some(b)) = (keys(a), keys(b)) else {
+        return false;
+    };
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|(a, b)| identifier_equal(Some(a), Some(b)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -572,23 +591,4 @@ mod tests {
         b.data_mut().enchantments[0].1 = 3;
         assert!(!component_equal("minecraft:enchantments", &a, &b));
     }
-}
-
-fn recipe_keys_equal(a: Option<&Tag>, b: Option<&Tag>) -> bool {
-    fn keys(value: Option<&Tag>) -> Option<&[Tag]> {
-        match value? {
-            Tag::List(values) => Some(values),
-            Tag::ByteArray(values) if values.is_empty() => Some(&[]),
-            Tag::IntArray(values) if values.is_empty() => Some(&[]),
-            Tag::LongArray(values) if values.is_empty() => Some(&[]),
-            _ => None,
-        }
-    }
-    let (Some(a), Some(b)) = (keys(a), keys(b)) else {
-        return false;
-    };
-    a.len() == b.len()
-        && a.iter()
-            .zip(b)
-            .all(|(a, b)| identifier_equal(Some(a), Some(b)))
 }
