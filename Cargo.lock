@@ -2314,8 +2314,11 @@ dependencies = [
  "horizon-mod-points",
  "horizon-mod-render",
  "horizon-mod-wasm",
+ "libloading",
  "log",
+ "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

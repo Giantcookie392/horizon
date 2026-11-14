@@ -2503,6 +2503,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn arrow_keys_select_servers_and_shift_moves_them() {
         let dir = std::env::temp_dir().join(format!("horizon-mp-keys-{}", std::process::id()));
         let saves = dir.join("saves");
@@ -2552,6 +2553,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn enter_joins_the_selected_server() {
         let dir = std::env::temp_dir().join(format!("horizon-mp-enter-{}", std::process::id()));
         let saves = dir.join("saves");
@@ -2587,6 +2589,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn a_server_dragged_by_its_row_moves_and_is_saved_on_release() {
         let dir = std::env::temp_dir().join(format!("horizon-mp-drag-{}", std::process::id()));
         let saves = dir.join("saves");
@@ -2651,6 +2654,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn icon_arrows_join_and_move_servers() {
         let dir = std::env::temp_dir().join(format!("horizon-mp-arrows-{}", std::process::id()));
         let saves = dir.join("saves");
@@ -2724,6 +2728,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn delete_asks_before_removing_the_server() {
         let dir = std::env::temp_dir().join(format!("horizon-mp-delete-{}", std::process::id()));
         let saves = dir.join("saves");
@@ -2793,6 +2798,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn edit_cycles_and_saves_the_server_resource_pack_setting() {
         let dir = std::env::temp_dir().join(format!("horizon-mp-packs-{}", std::process::id()));
         let saves = dir.join("saves");
