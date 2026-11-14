@@ -347,6 +347,7 @@ pub fn clear_log() -> Result<(), String> {
 /// Appends `message` (with a newline) to the build log, so a failure that happens before any
 /// command runs is still recorded.
 pub fn append_log(message: &str) -> Result<(), String> {
+    fs::create_dir_all(root()).map_err(|e| format!("{}: {e}", root().display()))?;
     let mut log = fs::OpenOptions::new()
         .create(true)
         .append(true)
