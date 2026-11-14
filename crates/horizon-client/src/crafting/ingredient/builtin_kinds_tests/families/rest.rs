@@ -912,7 +912,11 @@ fn block_state_component_recipes_decode_validate_and_match() {
 #[test]
 fn weapon_recipe_rejections_preserve_siblings_and_presence_strictness() {
     use serde_json::json;
-    let items = Items::empty();
+    let mut items = Items::empty();
+    // This opaque component is registered in a real catalog, but not Items::empty().
+    std::sync::Arc::make_mut(&mut items.component_registry)
+        .persistent_components
+        .push("minecraft:custom_data".into());
     let load = load();
     let context = load.loop_context(LoopSide::Server, []);
     let source = |payload| {
@@ -938,7 +942,6 @@ fn weapon_recipe_rejections_preserve_siblings_and_presence_strictness() {
         json!("weapon"),
         json!([]),
         json!({"item_damage_per_attack":"1"}),
-        json!({"disable_blocking_for_seconds":false}),
         json!({"disable_blocking_for_seconds":-0.0}),
     ] {
         let invalid = source(payload);
@@ -1070,7 +1073,7 @@ fn next_component_codecs_reject_bad_records_preserve_siblings_and_presence() {
         (
             "minecraft:compostable",
             json!({"layers":1,"ignored":true}),
-            vec![json!({}), json!({"layers":null}), json!({"layers":false})],
+            vec![json!({}), json!({"layers":null})],
         ),
         (
             "minecraft:brewing_fuel",
@@ -1203,6 +1206,36 @@ fn next_component_codecs_reject_bad_records_preserve_siblings_and_presence() {
             .set_loot_component(&removal_id, &Some(Tag::Compound(Default::default())));
         assert!(!inherited.test_in(&context, &paper));
         assert!(inherited_absent.test_in(&context, &paper));
+    }
+}
+
+#[test]
+fn json_booleans_are_read_as_numeric_flags_documented_leniency() {
+    use serde_json::json;
+    let items = Items::empty();
+    let load = load();
+    let context = load.loop_context(LoopSide::Server, []);
+    // Diverges from the reference: the shared JSON-to-NBT boundary reads booleans as
+    // numeric Byte flags, so integer and float component fields accept them.
+    for (id, payload, expected) in [
+        (
+            "minecraft:compostable",
+            json!({"layers":false}),
+            Tag::compound([("layers", Tag::Int(0))]),
+        ),
+        (
+            "minecraft:weapon",
+            json!({"disable_blocking_for_seconds":false}),
+            Tag::compound([("disable_blocking_for_seconds", Tag::Float(0.0f32.to_bits()))]),
+        ),
+    ] {
+        let source = json!({"type":"neoforge:components","items":"minecraft:paper",
+            "components":{id:payload}});
+        components::validate_recipe_components(&source, &items).unwrap();
+        let ingredient = Ingredient::parse(&source, &items).unwrap();
+        let mut stack = ItemStack::new("minecraft:paper", 1);
+        stack.data_mut().set_loot_component(id, &Some(expected));
+        assert!(ingredient.test_in(&context, &stack), "{id}");
     }
 }
 

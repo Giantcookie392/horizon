@@ -34,7 +34,7 @@ impl Game<'_> {
     pub(super) fn remote_move_vehicle_and_file(&mut self, position: [f64; 3], yaw: f32) {
         self.remote_move_vehicle(position, yaw);
         if let Some(mount) = self.driven_mount() {
-            self.entity_section_moved_id(mount.id as u32);
+            self.entity_section_moved_id(mount.id);
         }
     }
 
