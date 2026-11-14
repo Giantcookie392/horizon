@@ -81,3 +81,11 @@ migrate = "Take `ServerPlayerRef` instead of `PlayerRef`."   # optional
 A note with an unknown key, a missing `ids` or `why`, an empty `ids`, or an id that did not change is refused. The SDK's `sdk.json`
 carries the notes of the changes since the SDK before it (`surface.notes`), and `cargo horizon-mod update` prints a
 changed item's `migrate` line beside it.
+
+## Hook versions
+
+A hook's `version` changes when a listener can see a different meaning under the same signature: its answer now
+decides the action, or the order or timing it observes changed. It stays when the engine is only corrected to the
+contract the hook already documents. Every bump comes with a change note in the same change, so `sdk diff` and
+`cargo horizon-mod update` say what a listener must now do; the version is outside the hook's hash, so the diff
+counts a bump as a conditional change for the mods that name that version.
