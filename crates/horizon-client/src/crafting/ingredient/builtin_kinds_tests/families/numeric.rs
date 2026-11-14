@@ -132,6 +132,7 @@ fn components_map_id_decodes_signed_numbers_and_matches_live_values() {
     bare.data_mut().map_id = Some(-7);
     assert!(!no_default_absence.test_in(&context, &bare));
 }
+
 #[test]
 #[ignore = "requires prepared resources"]
 fn components_strict_counts_max_damage_default_and_custom_name() {
@@ -179,6 +180,7 @@ fn components_strict_counts_max_damage_default_and_custom_name() {
         "the literal max_damage default must be named"
     );
 }
+
 #[test]
 fn ominous_bottle_amplifier_codec_loads_matches_and_rejects_out_of_range() {
     let mut items = Items::empty();
@@ -694,3 +696,4 @@ fn minimum_attack_charge_recipe_decodes_and_matches_float_values() {
     assert!(absence.test_in(&context, &no_default));
     assert!(!positive.test_in(&context, &no_default));
 }
+

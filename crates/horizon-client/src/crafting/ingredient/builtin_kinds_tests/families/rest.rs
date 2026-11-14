@@ -26,6 +26,7 @@ fn components_removal_requires_absence_including_defaults() {
     );
     assert!(!ingredient.test_in(&context, &sword));
 }
+
 #[test]
 #[ignore = "requires prepared resources"]
 fn block_tag_logs_uses_block_items_and_rejects_hash() {
@@ -57,6 +58,7 @@ fn block_tag_logs_uses_block_items_and_rejects_hash() {
         .is_none()
     );
 }
+
 #[test]
 fn custom_display_matches_base_but_shows_another_item() {
     let items = Items::empty();
@@ -90,6 +92,7 @@ fn custom_display_matches_base_but_shows_another_item() {
         ["minecraft:oak_planks"]
     );
 }
+
 #[test]
 fn simplicity_follows_all_children_and_custom_display_base() {
     let items = Items::empty();
@@ -517,3 +520,4 @@ fn enchantment_glint_override_decodes_boolean_literals_and_borrowed_numeric_valu
     assert!(!absence.test_in(&context, &populated));
     assert!(absence.test_in(&context, &ItemStack::new("minecraft:stick", 1)));
 }
+
