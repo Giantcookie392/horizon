@@ -227,17 +227,7 @@ pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), Strin
             }
             Ok(())
         }
-        "minecraft:rarity" => match t {
-            Tag::String(s) => {
-                let s = s.to_string_lossy();
-                if ["common", "uncommon", "rare", "epic"].contains(&s.as_str()) {
-                    Ok(())
-                } else {
-                    Err(format!("Unknown element name:{s}"))
-                }
-            }
-            _ => Err("Not a string".into()),
-        },
+        "minecraft:rarity" => string_enum(t, &["common", "uncommon", "rare", "epic"]),
         "minecraft:enchantments" | "minecraft:stored_enchantments" => enchantment_map(t, reg),
         // DataComponents.ENCHANTMENT_GLINT_OVERRIDE: Codec.BOOL through NbtOps.
         "minecraft:enchantment_glint_override" => horizon_items::item_data::component_bool(t)
