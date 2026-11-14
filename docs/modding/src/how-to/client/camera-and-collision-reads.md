@@ -68,6 +68,25 @@ keeps its epoch. This supplies identity, not client entity reads: the server-onl
 entity data methods reject client handles. Unlike `view_hit` and `raycast`, this does not find blocks
 in distant terrain or return a block behind a targeted entity.
 
+## Local player reads
+
+These read the local player as the client sees it. They take no mod-controlled numbers and send nothing.
+
+- `ClientHost::client_session().client_latency()` is the player's latency in milliseconds as the
+  tab list draws it (`PlayerInfo.getLatency`): the server's smoothed keep-alive average, refreshed by
+  the server's own broadcast. It reads 0 before the server's first measurement, as vanilla does, and
+  `None` outside a world.
+- `ClientHost::local_item_use()` is the item in use: `ItemUse { hand, ticks_used, ticks_remaining }`
+  (`isUsingItem`, `getUsedItemHand`, `getTicksUsingItem`, `getUseItemRemainingTicks`).
+  `ticks_used + ticks_remaining` is the use duration. It is `None` when no item is in use or no world
+  is open.
+- `ClientHost::hover_name(&stack)` is `ItemStack.getHoverName()` as plain text: the custom name, else
+  a written book's non-blank title, else the item's name in the client's language, without rarity
+  colour or italics. An invalid stack reads an empty string.
+- Reach is `targeting()` (below), which comes from the interaction-range attributes with the server's
+  and equipment's modifiers. Menu slot numbers are `Slot.index`, the position in the menu's slot list
+  that `menu_slot` and `menu_slot_count` take; `menu_slot_backing` gives the index in the backing container.
+
 ## Combat targeting
 
 `ClientHost::targeting()` and `set_targeting(ClientTargeting)` control liquid picking,

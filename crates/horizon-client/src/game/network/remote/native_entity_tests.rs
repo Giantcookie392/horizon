@@ -362,3 +362,12 @@ fn a_villager_raid_sweat_event_draws_particles() {
         .unwrap();
     assert!(made(&game) > before, "event 42 draws the sweat");
 }
+
+impl super::Remote {
+    /// Lists this client's own player with `latency`, as the server's player info update does.
+    pub(in crate::game) fn list_self(&mut self, latency: i32) {
+        let mut me = horizon_client::tab_list::TabPlayer::new(self.profile, "SessionReadTest");
+        me.latency = latency;
+        self.tab_players.insert(self.profile, me);
+    }
+}
