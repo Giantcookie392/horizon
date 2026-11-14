@@ -24,6 +24,7 @@ fn int_of(t: &Tag) -> Option<i64> {
 }
 /// Built-ins with an implemented shared component payload decoder.
 pub const DECODED_COMPONENTS: &[&str] = &[
+    "minecraft:weapon",
     "minecraft:food",
     "minecraft:damage",
     "minecraft:repair_cost",
@@ -66,6 +67,7 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
             ("can_always_eat", Tag::Byte(i8::from(food.can_always_eat))),
         ]));
     }
+    if id == "minecraft:weapon" { return horizon_items::properties::Weapon::from_tag(value).map(|weapon| weapon.to_tag()).map_err(str::to_owned); }
     decode_component(id, value, reg)?;
     if id == "minecraft:block_entity_data" {
         let Tag::Compound(_) = value else {
@@ -128,6 +130,7 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
 /// The codecs of the item components commands commonly set.
 pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), String> {
     match id {
+        "minecraft:weapon" => horizon_items::properties::Weapon::from_tag(t).map(|_| ()).map_err(str::to_owned),
         "minecraft:food" => horizon_items::item_data::food_properties(t).map(|_| ()).map_err(str::to_owned),
         // MapId.CODEC is Codec.INT, without a non-negative constraint.
         "minecraft:map_id" => int_of(t).map(|_| ()).ok_or_else(|| "Not a number".into()),
