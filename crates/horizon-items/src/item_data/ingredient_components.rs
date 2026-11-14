@@ -40,6 +40,7 @@ pub fn removed(stack: &ItemStack, id: &str) -> bool {
 /// Presence is checked by the caller, so empty decoded enchantment maps compare equal.
 pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
     match id {
+        "minecraft:mob_visibility" => mob_visibility_equal(a.data().and_then(|d|d.other(id)),b.data().and_then(|d|d.other(id))),
         "minecraft:cooking_fuel" => super::cooking_fuel::equal(
             a.data().and_then(|d| d.other(id)),
             b.data().and_then(|d| d.other(id)),
@@ -417,6 +418,65 @@ fn identifier_equal(a: Option<&Tag>, b: Option<&Tag>) -> bool {
         prefix.encode_utf16().chain(path.iter().copied())
     }
     units(a).eq(units(b))
+}
+
+/// `MobVisibility.CODEC`: required holder set and inclusive boxed-float range.
+/// Registry references are resolved against the load context, never a built-in whitelist.
+pub fn decode_mob_visibility(
+    value: &Tag,
+    registry: &horizon_client_core::registries::Registries,
+) -> Result<Tag, String> {
+    let parsed = MobVisibility::parse(value)
+        .ok_or("Invalid mob_visibility fields or visibility outside [0;10]")?;
+    let targets =
+        super::component_values::holder_set(parsed.targets, "minecraft:entity_type", registry)?;
+    Ok(Tag::compound([
+        ("targeting_entity_types", targets),
+        ("visibility", Tag::Float(parsed.visibility.to_bits())),
+    ]))
+}
+
+struct MobVisibility<'a> {
+    targets: &'a Tag,
+    visibility: f32,
+}
+
+impl<'a> MobVisibility<'a> {
+    /// Borrow live persistent storage, accepting compact singleton holder sets.
+    fn parse(value: &'a Tag) -> Option<Self> {
+        let Tag::Compound(_) = value else { return None };
+        let targets = value.get("targeting_entity_types")?;
+        let visibility = match value.get("visibility")? {
+            Tag::Byte(v) => f32::from(*v),
+            Tag::Short(v) => f32::from(*v),
+            Tag::Int(v) => *v as f32,
+            Tag::Long(v) => *v as f32,
+            Tag::Float(v) => f32::from_bits(*v),
+            Tag::Double(v) => f64::from_bits(*v) as f32,
+            _ => return None,
+        };
+        // Float.compareTo distinguishes negative zero and orders NaN above 10.
+        if !visibility.is_finite() || visibility.is_sign_negative() || visibility > 10.0 {
+            return None;
+        }
+        Some(Self {
+            targets,
+            visibility,
+        })
+    }
+}
+
+fn mob_visibility_equal(a: Option<&Tag>, b: Option<&Tag>) -> bool {
+    let (Some(a), Some(b)) = (
+        a.and_then(MobVisibility::parse),
+        b.and_then(MobVisibility::parse),
+    ) else {
+        return false;
+    };
+    if a.visibility.to_bits() != b.visibility.to_bits() {
+        return false;
+    }
+    super::component_values::holder_set_equal(a.targets, b.targets)
 }
 
 fn block_entity_equal(a: Option<&Tag>, b: Option<&Tag>) -> bool {
