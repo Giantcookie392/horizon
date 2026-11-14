@@ -675,13 +675,11 @@ impl Game<'_> {
                 std::mem::swap(&mut host.mob_players, &mut bindings);
             }
             let callback_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                if section_yield {
-                    if let Some(sections) = section_table.as_ref() {
-                        self.entity_sections_ticked_live(
-                            &mut sections.borrow_mut(),
-                            &mut section_moves,
-                        );
-                    }
+                if section_yield && let Some(sections) = section_table.as_ref() {
+                    self.entity_sections_ticked_live(
+                        &mut sections.borrow_mut(),
+                        &mut section_moves,
+                    );
                 }
                 if let Some(id) = retry_rider {
                     self.dismount_mob(id);
