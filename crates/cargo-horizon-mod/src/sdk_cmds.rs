@@ -388,7 +388,7 @@ pub(crate) fn update_report(
     };
     // Known from the manifest: such a mod has no table to compare, so nothing is fetched for it.
     let table: toml::Table = toml::from_str(&manifest).map_err(|e| format!("{MANIFEST}: {e}"))?;
-    if horizon_mod_api_gen::mod_uses::exact(&table).is_some() {
+    if mod_source::mod_uses::exact(&table).is_some() {
         exact_line();
         return Ok(());
     }
