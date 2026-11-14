@@ -855,6 +855,52 @@ mod tests {
     use super::decode_component;
 
     #[test]
+    fn fox_variant_codec_accepts_only_exact_persistent_names() {
+        use super::{Registries, Tag, decoded_component_value};
+        use horizon_core::nbt::JavaString;
+        let registry = Registries::default();
+        for name in ["red", "snow"] {
+            let value = Tag::String(name.into());
+            assert_eq!(
+                decoded_component_value("minecraft:fox/variant", &value, &registry),
+                Ok(value)
+            );
+        }
+        for value in [
+            Tag::Byte(0),
+            Tag::Int(1),
+            Tag::Double(1.0f64.to_bits()),
+            Tag::List(vec![]),
+            Tag::compound([] as [(&str, Tag); 0]),
+        ] {
+            assert_eq!(
+                decoded_component_value("minecraft:fox/variant", &value, &registry),
+                Err("Not a string".into())
+            );
+        }
+        for name in ["", "RED", "Snow", "minecraft:red", "arctic", "red "] {
+            assert_eq!(
+                decoded_component_value(
+                    "minecraft:fox/variant",
+                    &Tag::String(name.into()),
+                    &registry
+                ),
+                Err(format!("Unknown element name:{name}"))
+            );
+        }
+        for units in [vec![0xd800], vec![114, 101, 100, 0xdc00]] {
+            assert!(
+                decoded_component_value(
+                    "minecraft:fox/variant",
+                    &Tag::String(JavaString(units)),
+                    &registry
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
     fn decoded_component_values_use_codec_numbers_and_retain_stored_values() {
         use super::{Registries, Tag, decoded_component_value};
         let registry = Registries::default();
