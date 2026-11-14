@@ -1016,6 +1016,58 @@ fn next_component_codecs_reject_bad_records_preserve_siblings_and_presence() {
     let context = load.loop_context(LoopSide::Server, []);
     for (id, valid, malformed) in [
         (
+            "minecraft:sheep/color",
+            json!("red"),
+            vec![json!("RED"), json!({})],
+        ),
+        (
+            "minecraft:shulker/color",
+            json!("red"),
+            vec![json!("RED"), json!({})],
+        ),
+        (
+            "minecraft:cat/collar",
+            json!("red"),
+            vec![json!("RED"), json!({})],
+        ),
+        (
+            "minecraft:wolf/collar",
+            json!("red"),
+            vec![json!("RED"), json!({})],
+        ),
+        (
+            "minecraft:custom_model_data",
+            json!({"floats":[1],"flags":[true],"strings":["x"],"colors":[[1,0,0]]}),
+            vec![
+                json!({"floats":1}),
+                json!({"floats":[false]}),
+                json!({"flags":["true"]}),
+                json!({"strings":[1]}),
+                json!({"colors":[[1,0]]}),
+            ],
+        ),
+        (
+            "minecraft:mob_visibility",
+            json!({"targeting_entity_types":[],"visibility":1}),
+            vec![
+                json!({}),
+                json!({"targeting_entity_types":[],"visibility":null}),
+                json!({"targeting_entity_types":null,"visibility":1}),
+                json!({"targeting_entity_types":[],"visibility":-1}),
+                json!({"targeting_entity_types":[],"visibility":11}),
+            ],
+        ),
+        (
+            "minecraft:recipes",
+            json!(["fixture:unknown"]),
+            vec![
+                json!("fixture:unknown"),
+                json!([1]),
+                json!(["BAD"]),
+                json!([null]),
+            ],
+        ),
+        (
             "minecraft:compostable",
             json!({"layers":1,"ignored":true}),
             vec![json!({}), json!({"layers":null}), json!({"layers":false})],
@@ -1161,6 +1213,11 @@ fn optional_codec_json_null_uses_defaults_without_weakening_required_fields() {
     let load = load();
     let root = tempfile::tempdir().unwrap();
     for (id, payload, expected) in [
+        (
+            "minecraft:custom_model_data",
+            json!({"floats":null,"flags":null,"strings":null,"colors":null}),
+            json!({}),
+        ),
         (
             "minecraft:weapon",
             json!({"item_damage_per_attack":null,"disable_blocking_for_seconds":null}),
@@ -2046,4 +2103,3 @@ fn recipes_component_cooking_decodes_keys_and_matches_without_allocations() {
     stack.count = 0;
     check(&empty, &stack, false);
 }
-

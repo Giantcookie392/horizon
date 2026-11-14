@@ -77,7 +77,7 @@ zero (including negative zero) is false; nonzero values, fractions and NaN are
 true. Displays retain canonical byte 0 or 1.
 `dyed_color` accepts packed integer colors or three numeric RGB channels,
 matching the decoded values without copying candidate payloads.
-The other 95 registered built-ins use stored-value matching while their shared
+The other 88 registered built-ins use stored-value matching while their shared
 decoders are added incrementally in **#3875**. Their absence is not a load refusal.
 
 `dye` accepts exactly the 16 lowercase vanilla color names (including `light_blue`
@@ -102,3 +102,9 @@ seconds; its optional group is a valid identifier. Compostable requires layers.
 Block state is a string-to-string property map. Optional JSON record fields treat
 null as absent; required fields still refuse null. Weapon seconds refuse negative
 zero before JSON-to-NBT conversion.
+
+Additional decoded values include sheep and shulker colors, cat and wolf collar
+colors (the same strict dye palette), ordered custom model data lists, mob
+visibility holder sets against active entity data, and ordered recipe keys.
+Custom model data lists default to empty, including JSON null optional fields.
+Recipe keys need no registry lookup; order and duplicates are retained.

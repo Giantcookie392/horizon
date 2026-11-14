@@ -98,9 +98,16 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
     if id == "minecraft:use_cooldown" {
         return use_cooldown(value);
     }
-    if id == "minecraft:custom_model_data" { return horizon_items::item_data::custom_model_data::decode(value).ok_or_else(|| "Expected custom model data record".into()); }
-    if id == "minecraft:mob_visibility" { return horizon_items::item_data::ingredient_components::decode_mob_visibility(value,reg); }
-    if id == "minecraft:recipes" { return recipes(value); }
+    if id == "minecraft:custom_model_data" {
+        return horizon_items::item_data::custom_model_data::decode(value)
+            .ok_or_else(|| "Expected custom model data record".into());
+    }
+    if id == "minecraft:mob_visibility" {
+        return horizon_items::item_data::ingredient_components::decode_mob_visibility(value, reg);
+    }
+    if id == "minecraft:recipes" {
+        return recipes(value);
+    }
     decode_component(id, value, reg)?;
     if id == "minecraft:block_entity_data" {
         let Tag::Compound(_) = value else {
@@ -163,12 +170,21 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
 /// The codecs of the item components commands commonly set.
 pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), String> {
     match id {
-        "minecraft:recipes" => recipes(t).map(|_|()),
-        "minecraft:mob_visibility" => horizon_items::item_data::ingredient_components::decode_mob_visibility(t,reg).map(|_|()),
-        "minecraft:custom_model_data" => horizon_items::item_data::custom_model_data::valid(t).then_some(()).ok_or_else(|| "Expected custom model data record".into()),
+        "minecraft:recipes" => recipes(t).map(|_| ()),
+        "minecraft:mob_visibility" => {
+            horizon_items::item_data::ingredient_components::decode_mob_visibility(t, reg)
+                .map(|_| ())
+        }
+        "minecraft:custom_model_data" => horizon_items::item_data::custom_model_data::valid(t)
+            .then_some(())
+            .ok_or_else(|| "Expected custom model data record".into()),
         // DyeColor.CODEC -> StringRepresentable.fromEnum: ordinary NbtOps uses
         // exact names, not the ordinal codec selected by compressMaps().
-        "minecraft:dye" | "minecraft:wolf/collar" | "minecraft:cat/collar" | "minecraft:shulker/color" | "minecraft:sheep/color" => match t {
+        "minecraft:dye"
+        | "minecraft:wolf/collar"
+        | "minecraft:cat/collar"
+        | "minecraft:shulker/color"
+        | "minecraft:sheep/color" => match t {
             Tag::String(name) => {
                 if horizon_items::firework::DYE_FIREWORK_COLORS
                     .iter()

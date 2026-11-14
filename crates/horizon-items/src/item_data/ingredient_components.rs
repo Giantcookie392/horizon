@@ -40,8 +40,14 @@ pub fn removed(stack: &ItemStack, id: &str) -> bool {
 /// Presence is checked by the caller, so empty decoded enchantment maps compare equal.
 pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
     match id {
-        "minecraft:recipes" => recipe_keys_equal(a.data().and_then(|d|d.other(id)),b.data().and_then(|d|d.other(id))),
-        "minecraft:mob_visibility" => mob_visibility_equal(a.data().and_then(|d|d.other(id)),b.data().and_then(|d|d.other(id))),
+        "minecraft:recipes" => recipe_keys_equal(
+            a.data().and_then(|d| d.other(id)),
+            b.data().and_then(|d| d.other(id)),
+        ),
+        "minecraft:mob_visibility" => mob_visibility_equal(
+            a.data().and_then(|d| d.other(id)),
+            b.data().and_then(|d| d.other(id)),
+        ),
         "minecraft:cooking_fuel" => super::cooking_fuel::equal(
             a.data().and_then(|d| d.other(id)),
             b.data().and_then(|d| d.other(id)),
@@ -191,7 +197,11 @@ pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
         "minecraft:ominous_bottle_amplifier" => ominous_amplifier(a) == ominous_amplifier(b),
         // DyeColor.CODEC's canonical NbtOps value is its exact serialized name.
         // Live stacks retain these colors in `other`; borrow UTF-16 without palette scans.
-        "minecraft:dye" | "minecraft:wolf/collar" | "minecraft:cat/collar" | "minecraft:shulker/color" | "minecraft:sheep/color" => match (
+        "minecraft:dye"
+        | "minecraft:wolf/collar"
+        | "minecraft:cat/collar"
+        | "minecraft:shulker/color"
+        | "minecraft:sheep/color" => match (
             a.data().and_then(|d| d.other(id)),
             b.data().and_then(|d| d.other(id)),
         ) {
