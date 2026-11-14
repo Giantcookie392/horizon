@@ -193,8 +193,11 @@ def chapters(items):
 
 def preprocess(context, book):
     root = Path(context["root"]).resolve().parents[1]
-    sys.path[:0] = [str(root / "tools"), str(root / "tools/ci")]
-    import nightly
+    # As a package, the way the tests import it: run as a script, nightly.py puts tools/ first on
+    # the path, which would shadow tests/ modules of the same name.
+    if str(root) not in sys.path:
+        sys.path.append(str(root))
+    from tools.ci import nightly
     render = {
         "{{#sdk-assets}}": lambda: assets(nightly.SDK_ASSETS),
         "{{#sdk-hosts}}": lambda: hosts(nightly.SDK_LEGS),

@@ -5,10 +5,10 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path[:0] = [str(ROOT / "tools"), str(ROOT / "tools/ci")]
+sys.path.append(str(ROOT / "tools"))
 
 import modding_sdk_tables as tables  # noqa: E402
-import nightly  # noqa: E402
+from tools.ci import nightly  # noqa: E402
 
 
 class SdkTablesTests(unittest.TestCase):
