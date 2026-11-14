@@ -440,9 +440,11 @@ def build(out: Path, server: bool) -> None:
                 stem = file.name.removeprefix("lib").split(".")[0]
                 if file.is_file() and file.name.endswith(NATIVE_SUFFIXES) and stem not in bundled:
                     shutil.copy2(file, native / file.name)
-    for name, source in CARRIED.items():
-        if source is not None:
-            shutil.copy2(source, out / name)
+    # The commit's bytes, as the build data's are, not a checkout's (CRLF under Git for Windows).
+    carried = {name: source.relative_to(ROOT).as_posix() for name, source in CARRIED.items() if source is not None}
+    blobs = dict(tracked_blobs(ROOT, head(), tuple(carried.values())))
+    for name, path in carried.items():
+        (out / name).write_bytes(blobs[path])
     patches = carry_patches(staged, out)
     game = next(script for script in scripts if script["package_id"].split("#")[0].endswith("/horizon-client"))
     for manifest in BUILD_DATA:
