@@ -90,7 +90,7 @@ impl Game<'_> {
 
     /// `Player.tick`'s sleep counter, and `LivingEntity.tick`'s wake-up of a
     /// sleeper who died or whose bed is gone.
-    pub(super) fn guest_sleep_tick(&mut self, gi: usize) {
+    pub(crate) fn guest_sleep_tick(&mut self, gi: usize) {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
