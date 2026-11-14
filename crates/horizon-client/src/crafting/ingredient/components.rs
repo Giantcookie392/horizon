@@ -195,11 +195,18 @@ pub(super) fn json_patch(data: &serde_json::Map<String, Value>) -> Option<Compou
             _ => &[],
         };
         if let Some(record) = value.as_object() {
+            let mut normalized_record = None;
             for field in optional {
                 if record.get(*field).is_some_and(Value::is_null) {
-                    let patch = normalized.get_or_insert_with(|| data.clone());
-                    patch.get_mut(id)?.as_object_mut()?.remove(*field);
+                    normalized_record
+                        .get_or_insert_with(|| record.clone())
+                        .remove(*field);
                 }
+            }
+            if let Some(record) = normalized_record {
+                normalized
+                    .get_or_insert_with(|| data.clone())
+                    .insert(id.clone(), Value::Object(record));
             }
         }
     }
