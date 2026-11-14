@@ -71,6 +71,40 @@ class ClippyCacheTests(unittest.TestCase):
                                             "-D", "warnings"])
                     self.assertIsNone(incremental_env)
 
+    def test_cache_errors_retry_then_fall_back_but_compiler_errors_do_not(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cache = root / "sccache"
+            cache.write_text(f"#!{sys.executable}\n"
+                             "import os, pathlib, sys\n"
+                             "with open(os.environ['CALLS'], 'a') as f: f.write('cache\\n')\n"
+                             "if os.environ['MODE'] == 'outage':\n"
+                             "    print('sccache: error: Connection to server timed out', file=sys.stderr)\n"
+                             "    sys.exit(2)\n"
+                             "os.execv(sys.argv[1], sys.argv[1:])\n")
+            compiler = root / "rustc"
+            compiler.write_text(f"#!{sys.executable}\n"
+                                "import os, sys\n"
+                                "with open(os.environ['CALLS'], 'a') as f: f.write('compiler\\n')\n"
+                                "if os.environ['MODE'] == 'error':\n"
+                                "    print('error[E0425]: cannot find function', file=sys.stderr)\n"
+                                "    sys.exit(2)\n"
+                                "print('compiled')\n")
+            cache.chmod(0o755)
+            compiler.chmod(0o755)
+            for mode, code, expected in [("outage", 0, ["cache", "cache", "compiler"]),
+                                          ("error", 2, ["cache", "compiler"]),
+                                          ("healthy", 0, ["cache", "compiler"])]:
+                calls = root / mode
+                env = dict(os.environ, PATH=directory + os.pathsep + os.environ["PATH"],
+                           MODE=mode, CALLS=str(calls))
+                result = subprocess.run([WRAPPER, compiler], env=env, capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, code, result.stderr)
+                self.assertEqual(calls.read_text().splitlines(), expected)
+                self.assertEqual('::warning::' in result.stderr, mode == 'outage')
+                if mode == 'error':
+                    self.assertIn('error[E0425]', result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
