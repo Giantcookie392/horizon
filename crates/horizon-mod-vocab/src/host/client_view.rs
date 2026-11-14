@@ -58,6 +58,16 @@ pub trait ClientViewClientHost {
     #[access(ClientSetup)]
     fn camera(&self) -> Option<Camera>;
     /// Side: client.
+    /// Turns the local player's view to `yaw` and `pitch` (degrees), as `setYRot` and `setXRot`
+    /// store them: yaw as given (not wrapped; the server wraps it), pitch `% 360` then clamped to
+    /// -90..90. The previous-frame angles move by the same amount, as `Entity.turn` does for the
+    /// mouse, so the view doesn't jump for a frame. Sends no packet: the game's own player sync of
+    /// this client tick sends the look in its one move packet, only while the camera is the player
+    /// (the rotation-only packet when riding); a call after that step goes out the next tick.
+    /// `NotFinite`, changing nothing, for a NaN or infinite value; `NoWorld` outside a client world.
+    #[access(WorldOnly)]
+    fn set_local_rotation(&mut self, yaw: f32, pitch: f32) -> Result<(), LocalRotationError>;
+    /// Side: client.
     /// The entity the view follows (`Minecraft.getCameraEntity`): the entity a server attached
     /// the camera to, else the local player. None outside a client world.
     #[access(ClientSetup)]

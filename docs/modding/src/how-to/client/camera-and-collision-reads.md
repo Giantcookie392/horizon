@@ -24,6 +24,16 @@ has no such rule: Horizon adds it.
 
 The `ClientHost::camera()` helper returns the most recently extracted world frame's camera, or none before one exists. Its position, interpolated eye height, partial tick, angles, final FOV, near/far planes and dimension accompany column-major view and projection matrices. The view is camera-relative and includes bob and spin; projection uses reversed Z. Earlier callbacks in a frame can see the previous frame. `block_collision(pos)` returns block-local `[min_x, min_y, min_z, max_x, max_y, max_z]` boxes with an empty collision context; unloaded blocks and collision errors give no boxes.
 
+`ClientHost::set_local_rotation(yaw, pitch)` turns the local player's view, as vanilla's `setYRot`
+and `setXRot` store it: yaw as given (not wrapped; the server wraps it), pitch `% 360` then clamped to
+-90..90. The previous-frame angles move by the same amount, so the view doesn't jump. The call sends no
+packet. The game's own player sync at the end of the client tick sends the look in its one move packet,
+of the kind vanilla picks, and only while the camera is the player (a rider sends the rotation-only
+packet). Several calls in one tick send the last values once, and a call after the sync goes out the
+next tick. NaN or infinity returns `NotFinite` and changes nothing; outside a world the call returns
+`NoWorld`. The server sees an ordinary client look, at tick granularity, as from a mouse.
+`calculate_player_turn` changes how far the mouse turns the view; `set_local_rotation` sets it directly.
+
 `ClientHost::set_camera_type(type)` is a queued client-only effect and takes `&self`, so
 shared callbacks such as `camera_pose` can request a perspective. `camera_type()` reports
 the latest request immediately; several requests coalesce to the last one. Requests before

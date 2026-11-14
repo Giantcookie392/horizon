@@ -39,6 +39,33 @@ impl Game<'_> {
         Some(horizon_client::lang::code())
     }
 
+    /// `setYRot` / `setXRot` of the local player by a client mod: yaw as given, pitch `% 360`
+    /// clamped to -90..90, the previous angles moved by as much (`Entity.turn`). Sends nothing:
+    /// the tick's player sync (`remote_send_state`) carries the look.
+    pub(in crate::game) fn set_local_rotation(
+        &mut self,
+        yaw: f32,
+        pitch: f32,
+    ) -> Result<(), mod_api::LocalRotationError> {
+        if self.native_session().is_none() || self.player.is_none() {
+            return Err(mod_api::LocalRotationError::NoWorld);
+        }
+        if !(yaw.is_finite() && pitch.is_finite()) {
+            return Err(mod_api::LocalRotationError::NotFinite);
+        }
+        let pitch = (pitch % 360.0).clamp(-90.0, 90.0);
+        let (turned_yaw, turned_pitch) = (yaw - self.yaw, pitch - self.pitch);
+        self.rope_rot_old.0 += turned_yaw;
+        self.rope_rot_old.1 += turned_pitch;
+        self.yaw = yaw;
+        self.pitch = pitch;
+        if let Some(model) = self.player_model.as_mut() {
+            model.previous_head_pitch += turned_pitch;
+            model.head_pitch = pitch;
+        }
+        Ok(())
+    }
+
     /// Existing local frame counters; None outside a logged-in client world.
     /// This read collects no history and sends nothing anywhere.
     pub(super) fn native_client_frame_stats(&self) -> Option<ClientFrameStats> {
