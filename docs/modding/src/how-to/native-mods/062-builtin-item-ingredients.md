@@ -54,9 +54,16 @@ Native registrations retain their persistent NBT validation contract.
 
 The shared decoder currently covers `damage`, `repair_cost`, `max_damage`,
 `max_stack_size`, `rarity`, `enchantments`, `stored_enchantments`, `custom_name`,
-`item_name`, and `block_entity_data` in the `minecraft` namespace. The other
-112 registered built-ins use stored-value matching while their shared decoders
+`item_name`, `block_entity_data`, and `brewing_fuel` in the `minecraft` namespace. The other
+111 registered built-ins use stored-value matching while their shared decoders
 are added incrementally in **#3875**. Their absence is not a load refusal.
+
+`brewing_fuel` requires both `uses` and `speed_multiplier`. Each accepts a number
+or a context-provider resource key (default namespace `minecraft`); keys need not
+currently resolve. Uses follow Java integer coercion; speed is a 32-bit float,
+including infinities and NaN. Neither field has positivity/range constraints.
+Unknown fields are ignored. Matching rejects malformed live values, compares
+normalized references, and distinguishes positive and negative floating-point zero.
 
 Component ingredient displays contain the patch, including removals. Difference
 lists retain the base list and remove only items whose default stack passes the
