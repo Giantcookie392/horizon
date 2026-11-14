@@ -127,21 +127,6 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
         "minecraft:dyed_color" => {
             Tag::Int(horizon_core::color::rgb_color_from_tag(value).expect("validated RGB color"))
         }
-        // DyeColor.CODEC -> StringRepresentable.fromEnum: ordinary NbtOps uses
-        // exact names, not the ordinal codec selected by compressMaps().
-        "minecraft:dye" => match t {
-            Tag::String(name) => {
-                if horizon_items::firework::DYE_FIREWORK_COLORS
-                    .iter()
-                    .any(|(color, _)| name.0.iter().copied().eq(color.encode_utf16()))
-                {
-                    Ok(())
-                } else {
-                    Err(format!("Unknown element name:{}", name.to_string_lossy()))
-                }
-            }
-            _ => Err("Not a string".into()),
-        },
         "minecraft:enchantments" | "minecraft:stored_enchantments" => {
             let Tag::Compound(entries) = value else {
                 unreachable!("validated enchantment map")
@@ -167,6 +152,22 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
 /// The codecs of the item components commands commonly set.
 pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), String> {
     match id {
+        // DyeColor.CODEC -> StringRepresentable.fromEnum: ordinary NbtOps uses
+        // exact names, not the ordinal codec selected by compressMaps().
+        "minecraft:dye" => match t {
+            Tag::String(name) => {
+                if horizon_items::firework::DYE_FIREWORK_COLORS
+                    .iter()
+                    .any(|(color, _)| name.0.iter().copied().eq(color.encode_utf16()))
+                {
+                    Ok(())
+                } else {
+                    Err(format!("Unknown element name:{}", name.to_string_lossy()))
+                }
+            }
+            _ => Err("Not a string".into()),
+        },
+
         "minecraft:use_cooldown" => use_cooldown(t).map(|_| ()),
         "minecraft:cooking_fuel" => horizon_items::item_data::cooking_fuel::decode(t).map(|_| ()),
         "minecraft:brewing_fuel" => horizon_items::item_data::brewing_fuel::decode(t).map(|_| ()),
