@@ -188,13 +188,23 @@ impl ComponentPredicate {
 pub(super) fn json_patch(data: &serde_json::Map<String, Value>) -> Option<Compound> {
     let mut normalized = None;
     for (id, value) in data {
-        let optional: &[&str] = match id.strip_prefix("minecraft:").unwrap_or(id) {
+        let component = id.strip_prefix("minecraft:").unwrap_or(id);
+        let optional: &[&str] = match component {
             "weapon" => &["item_damage_per_attack", "disable_blocking_for_seconds"],
             "food" => &["can_always_eat"],
             "use_cooldown" => &["cooldown_group"],
             _ => &[],
         };
         if let Some(record) = value.as_object() {
+            // Integral JSON-to-NBT conversion would discard weapon's forbidden sign.
+            if component == "weapon"
+                && record
+                    .get("disable_blocking_for_seconds")
+                    .and_then(Value::as_f64)
+                    .is_some_and(|seconds| seconds == 0.0 && seconds.is_sign_negative())
+            {
+                return None;
+            }
             let mut normalized_record = None;
             for field in optional {
                 if record.get(*field).is_some_and(Value::is_null) {
@@ -216,20 +226,6 @@ pub(super) fn json_patch(data: &serde_json::Map<String, Value>) -> Option<Compou
 // Keep conversion failures alongside codec errors at the recipe publication boundary.
 pub(super) fn validate_recipe_components(value: &Value, items: &Items) -> Result<(), String> {
     let object = value.as_object().ok_or("malformed components ingredient")?;
-    // Generic JsonOps-to-NBT conversion canonicalizes integral zero, so reject
-    // weapon's forbidden negative zero before its sign can be discarded.
-    if let Some(patch) = object.get("components").and_then(Value::as_object) {
-        for id in ["minecraft:weapon", "weapon"] {
-            if patch
-                .get(id)
-                .and_then(|weapon| weapon.get("disable_blocking_for_seconds"))
-                .and_then(Value::as_f64)
-                .is_some_and(|seconds| seconds == 0.0 && seconds.is_sign_negative())
-            {
-                return Err("component minecraft:weapon: disable_blocking_for_seconds must not be negative zero".into());
-            }
-        }
-    }
     let keys = object
         .get("components")
         .and_then(Value::as_object)

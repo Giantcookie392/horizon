@@ -920,6 +920,17 @@ fn weapon_recipe_rejections_preserve_siblings_and_presence_strictness() {
         "components":{"minecraft:weapon":payload},"strict":true})
     };
     let recipe = |ingredient| json!({"type":"minecraft:crafting_shapeless","ingredients":[ingredient],"result":{"id":"minecraft:diamond"}});
+    assert!(
+        Ingredient::parse(
+            &source(json!({"disable_blocking_for_seconds":-0.0})),
+            &items
+        )
+        .is_none()
+    );
+    assert!(
+        Ingredient::parse(&source(json!({"disable_blocking_for_seconds":0.0})), &items).is_some()
+    );
+    assert!(Ingredient::parse(&json!({"type":"neoforge:components","items":"minecraft:paper","components":{"minecraft:custom_data":{"negative_zero":-0.0}}}), &items).is_some());
     for payload in [
         json!(true),
         json!(false),
