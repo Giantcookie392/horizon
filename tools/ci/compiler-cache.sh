@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
+# Route rustc through sccache, falling back to an uncached compile on a cache outage.
+# Keep clippy-driver direct for hand-written workspace linting.
 # Cargo nests RUSTC_WORKSPACE_WRAPPER (clippy-driver) inside RUSTC_WRAPPER.
-# Keep hand-written workspace linting direct and cache ordinary rustc invocations.
-# Also used by ordinary builds: a cache outage must never replace a compiler result.
 set -euo pipefail
 case "${1##*/}" in
   clippy-driver | clippy-driver.exe)

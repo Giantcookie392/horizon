@@ -1,4 +1,4 @@
-"""The lint wrapper preserves Clippy's nested invocation and caches rustc only."""
+"""The compiler wrapper preserves routing and falls back only on cache outages."""
 import json
 import os
 from pathlib import Path
@@ -8,11 +8,11 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-WRAPPER = ROOT / "tools/ci/clippy-cache.sh"
+WRAPPER = ROOT / "tools/ci/compiler-cache.sh"
 
 
 @unittest.skipIf(os.name == "nt", "executes a shell wrapper and fake compilers through their shebang lines")
-class ClippyCacheTests(unittest.TestCase):
+class CompilerCacheTests(unittest.TestCase):
     def test_compiler_routing_preserves_arguments_environment_and_exit_status(self):
         with tempfile.TemporaryDirectory() as directory:
             bin_dir = Path(directory)

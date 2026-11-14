@@ -18,7 +18,7 @@ if [ "$(uname)" = Darwin ]; then
   # outages and then compiles directly; it also routes nested Clippy invocations.
   # Not for a release (HORIZON_NO_SCCACHE=1, game-build.yml's trusted builds): pull requests' jobs write that cache.
   if [ -x /opt/homebrew/bin/sccache ] && [ -z "${HORIZON_NO_SCCACHE:-}" ]; then
-    { echo "RUSTC_WRAPPER=$GITHUB_WORKSPACE/tools/ci/clippy-cache.sh"; echo "CARGO_INCREMENTAL=0"; } >> "$GITHUB_ENV"
+    { echo "RUSTC_WRAPPER=$GITHUB_WORKSPACE/tools/ci/compiler-cache.sh"; echo "CARGO_INCREMENTAL=0"; } >> "$GITHUB_ENV"
   fi
 else
   python=$(command -v python3.13 || true)
@@ -43,7 +43,7 @@ else
   { echo "$bin"; echo "$java_home/bin"; } >> "$GITHUB_PATH"
   echo "JAVA_HOME=$java_home" >> "$GITHUB_ENV"
   if [ -z "${HORIZON_NO_SCCACHE:-}" ] && command -v sccache > /dev/null; then
-    { echo "RUSTC_WRAPPER=$GITHUB_WORKSPACE/tools/ci/clippy-cache.sh"; echo "CARGO_INCREMENTAL=0"; } >> "$GITHUB_ENV"
+    { echo "RUSTC_WRAPPER=$GITHUB_WORKSPACE/tools/ci/compiler-cache.sh"; echo "CARGO_INCREMENTAL=0"; } >> "$GITHUB_ENV"
   fi
 fi
 echo "HORIZON_NO_AUDIO=1" >> "$GITHUB_ENV"
