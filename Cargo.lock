@@ -509,7 +509,6 @@ name = "cargo-horizon-mod"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "cap-std",
  "dunce",
  "horizon-addresses",
  "horizon-mod-package",
@@ -2320,7 +2319,6 @@ version = "0.1.0"
 dependencies = [
  "cap-fs-ext",
  "cap-std",
- "flate2",
  "getrandom 0.4.3",
  "horizon-core",
  "horizon-mod-api",
