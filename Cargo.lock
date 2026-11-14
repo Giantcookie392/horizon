@@ -511,6 +511,7 @@ dependencies = [
  "base64 0.22.1",
  "cap-std",
  "dunce",
+ "horizon-addresses",
  "horizon-mod-api-gen",
  "horizon-mod-package",
  "horizon-mod-point-emit",
@@ -2046,6 +2047,7 @@ version = "0.1.0"
 dependencies = [
  "horizon-client-core",
  "horizon-core",
+ "horizon-items",
  "horizon-protocol",
  "horizon-world",
 ]

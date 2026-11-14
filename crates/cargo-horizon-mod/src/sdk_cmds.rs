@@ -383,14 +383,21 @@ pub(crate) fn update_report(
     let manifest =
         std::fs::read_to_string(root.join(MANIFEST)).map_err(|e| format!("{MANIFEST}: {e}"))?;
     let name = display_name(&manifest)?;
+    let exact_line = || {
+        println!("{name} is made for exactly one build; its declarations are checked as it moves.")
+    };
+    // Known from the manifest: such a mod has no table to compare, so nothing is fetched for it.
+    let table: toml::Table = toml::from_str(&manifest).map_err(|e| format!("{MANIFEST}: {e}"))?;
+    if horizon_mod_api_gen::mod_uses::exact(&table).is_some() {
+        exact_line();
+        return Ok(());
+    }
     let old = ensure_sdk(root)?;
     let old_surface = surface_of(&old)?;
     let uses = match uses_table::scan(entry, root, &old_surface)? {
         Scanned::Uses(uses) => uses,
         Scanned::Exact(_) => {
-            println!(
-                "{name} is made for exactly one build; its declarations are checked as it moves."
-            );
+            exact_line();
             return Ok(());
         }
         Scanned::Unread(why) => return Err(why),
@@ -494,6 +501,9 @@ pub(crate) fn check_mod(entry: ChildEntry, args: &[String]) -> Result<(), String
         println!("{}: the package rules hold.", package.manifest.name);
         return Ok(());
     }
+    // The mod's `horizon-mod-api` is a path into `.horizon/sdk/`: fetch it before Cargo looks.
+    let sdk = ensure_sdk(root)?;
+    let surface = surface_of(&sdk)?;
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     for target in [None, Some("wasm32-unknown-unknown")] {
         let mut command = Command::new(&cargo);
@@ -507,8 +517,6 @@ pub(crate) fn check_mod(entry: ChildEntry, args: &[String]) -> Result<(), String
             return Err(format!("cargo check for {on} failed"));
         }
     }
-    let sdk = ensure_sdk(root)?;
-    let surface = surface_of(&sdk)?;
     match uses_table::scan(entry, root, &surface)? {
         Scanned::Uses(uses) => {
             print!(

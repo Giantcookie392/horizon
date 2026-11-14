@@ -62,8 +62,6 @@ horizon-friends = { path = "../crates/horizon-friends" }
 horizon-port-pack = { path = "../crates/horizon-port-pack" }
 # Horizon's mod registry: its index and the checks a download passes before install.
 horizon-mod-package = { path = "../crates/horizon-mod-package", features = ["index", "prebuilt", "runtime-process"] }
-# The fit test: what a mod uses of the game, against a build's surface (SDK design §10).
-horizon-mod-surface = { path = "../crates/horizon-mod-surface" }
 # Use the game's manifest validation for native shader identities.
 horizon-shader-api = { path = "../crates/horizon-shader-api" }
 # Signed updates: archives are checked against the release's signed checksums (docs/security.md).

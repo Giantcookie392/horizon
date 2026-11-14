@@ -21,7 +21,7 @@ impl Project {
             .join(format!("internals-{name}-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join(MANIFEST), format!("# A modder's description\nid = 'example'\nname = 'Example'\nversion = '0.1.0'\napi = '0.2'\ncapabilities = ['registries']\n{declarations}\n[native] # native settings\ngame = '26.3'\nhorizon = '{OLD}' # pinned game\nmixins = '{}'\n", "a".repeat(40))).unwrap();
-        fs::write(dir.join("Cargo.toml"), format!("# Keep this comment\n[package]\nname = 'example'\nversion = '0.1.0'\n[dependencies]\nhorizon-mod-api = {{ path = '.horizon/sdk/api/crates/horizon-mod-api' }} # API pin\nhorizon-internals = {{ path = '.horizon/sdk/api/crates/horizon-internals' }} # facade pin\n")).unwrap();
+        fs::write(dir.join("Cargo.toml"), "# Keep this comment\n[package]\nname = 'example'\nversion = '0.1.0'\n[dependencies]\nhorizon-mod-api = { path = '.horizon/sdk/api/crates/horizon-mod-api' } # API pin\nhorizon-internals = { path = '.horizon/sdk/api/crates/horizon-internals' } # facade pin\n").unwrap();
         let project = Self { dir };
         project.catalog(OLD, OLD_CATALOG);
         project.catalog(NEW, NEW_CATALOG);
@@ -69,6 +69,7 @@ fn success(output: &Output) -> String {
 }
 
 #[test]
+#[ignore = "daily"]
 fn internals_add_writes_pinned_hashes_and_preserves_the_rest_of_the_manifest() {
     let project = Project::new("add", "");
     let output = project.run(&[
@@ -100,6 +101,7 @@ fn internals_add_writes_pinned_hashes_and_preserves_the_rest_of_the_manifest() {
 }
 
 #[test]
+#[ignore = "daily"]
 fn internals_commands_refuse_wasm_mods_without_edits() {
     let project = Project::new("wasm-refused", "");
     let manifest = format!(
@@ -119,6 +121,7 @@ fn internals_commands_refuse_wasm_mods_without_edits() {
 }
 
 #[test]
+#[ignore = "daily"]
 fn native_sync_refuses_repo() {
     let project = Project::new("sync-native-repo", "");
     let output = project.run(&["internals", "sync", "--repo", "."]);
@@ -127,6 +130,7 @@ fn native_sync_refuses_repo() {
 }
 
 #[test]
+#[ignore = "daily"]
 fn internals_add_refuses_missing_gated_and_shape_only_paths_without_partial_edits() {
     let project = Project::new("refusals", "");
     for (path, code, wording) in [
@@ -177,6 +181,7 @@ fn internals_add_refuses_missing_gated_and_shape_only_paths_without_partial_edit
 }
 
 #[test]
+#[ignore = "daily"]
 fn update_diffs_signatures_refreshes_present_hashes_and_keeps_missing_declarations() {
     let project = Project::new(
         "update",
@@ -231,6 +236,7 @@ fn update_diffs_signatures_refreshes_present_hashes_and_keeps_missing_declaratio
 }
 
 #[test]
+#[ignore = "daily"]
 fn table_declarations_keep_their_format_when_adding_and_refreshing() {
     let project = Project::new(
         "tables",
@@ -255,6 +261,7 @@ fn table_declarations_keep_their_format_when_adding_and_refreshing() {
 }
 
 #[test]
+#[ignore = "daily"]
 fn internals_add_requires_kind_for_ambiguous_paths_and_update_keeps_it() {
     let path = "horizon_client::game::Round::listening";
     for kind in ["fn", "method"] {
@@ -311,6 +318,7 @@ fn internals_add_requires_kind_for_ambiguous_paths_and_update_keeps_it() {
 }
 
 #[test]
+#[ignore = "daily"]
 fn unreadable_new_catalog_does_not_move_either_pin_or_hashes() {
     let project = Project::new(
         "bad-catalog",
@@ -351,6 +359,7 @@ fn write_launcher_actor() {
 
 #[cfg(unix)]
 #[test]
+#[ignore = "daily"]
 fn internals_sync_invokes_the_launcher_and_never_edits_on_failure() {
     let project = Project::new(
         "sync-command",

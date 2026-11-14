@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 /// The SDK's folder in a project.
 pub(crate) const DIR: &str = ".horizon/sdk";
 /// The releases' base, when `HORIZON_SDK_BASE` names none.
-const BASE: &str = "https://github.com/arismoko/horizon/releases/download";
+const BASE: &str = horizon_addresses::SDK_RELEASES;
 /// The file naming the build a folder holds, written last: a folder without it is not one.
 const STAMP: &str = "build";
 const SURFACE: &str = "surface.json";
@@ -84,25 +84,28 @@ pub(crate) fn pin(project: &Path) -> Result<String, String> {
 /// Pins the project at `project` to `build`, a full sha, and drops the SDK of the old pin: the
 /// next command fetches the new one.
 pub(crate) fn repin(project: &Path, build: &str) -> Result<(), String> {
-    let edit = |name: &str, set: &dyn Fn(&mut toml_edit::DocumentMut)| {
+    // The pin's own comment and spacing stay: only its value changes.
+    let edit = |name: &str, pin: &dyn Fn(&mut toml_edit::DocumentMut) -> &mut toml_edit::Item| {
         let path = project.join(name);
         let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let mut doc: toml_edit::DocumentMut = text
             .parse()
             .map_err(|e| format!("{}: {e}", path.display()))?;
-        set(&mut doc);
+        let item = pin(&mut doc);
+        match item.as_value_mut() {
+            Some(value) => crate::internals::set_string(value, build),
+            None => *item = toml_edit::value(build),
+        }
         fs::write(&path, doc.to_string()).map_err(|e| format!("{}: {e}", path.display()))
     };
     let manifest = Manifest::parse(
         &fs::read_to_string(project.join(MANIFEST)).map_err(|e| format!("{MANIFEST}: {e}"))?,
     )?;
     if manifest.native.is_some() {
-        edit(MANIFEST, &|doc: &mut toml_edit::DocumentMut| {
-            doc["native"]["horizon"] = toml_edit::value(build)
-        })?;
+        edit(MANIFEST, &|doc| &mut doc["native"]["horizon"])?;
     } else {
-        edit("Cargo.toml", &|doc: &mut toml_edit::DocumentMut| {
-            doc["package"]["metadata"]["horizon"]["sdk"] = toml_edit::value(build)
+        edit("Cargo.toml", &|doc| {
+            &mut doc["package"]["metadata"]["horizon"]["sdk"]
         })?;
     }
     match fs::remove_dir_all(project.join(DIR)) {
@@ -236,11 +239,8 @@ impl Base {
                 .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
                 .collect()),
             Self::Url(base) if base == BASE => {
-                let api = format!(
-                    "https://api.github.com/repos/{}/releases?per_page=100",
-                    native::PREBUILT_REPO
-                );
-                let text = ureq::get(&api)
+                let api = horizon_addresses::SDK_RELEASE_LIST;
+                let text = ureq::get(api)
                     .call()
                     .map_err(|e| format!("{api}: {e}"))?
                     .into_string()
@@ -275,11 +275,10 @@ pub(crate) fn fetch(
         let index = Index::read(&bytes, build).map_err(|e| format!("{tag}: {e}"))?;
         return Ok(pinned(&index, dir));
     }
-    match fs::remove_dir_all(dir) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-            return Err(format!("{}: {e}", dir.display()));
-        }
-        _ => {}
+    if let Err(e) = fs::remove_dir_all(dir)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        return Err(format!("{}: {e}", dir.display()));
     }
     fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let sums = base.read(&tag, horizon_release_sign::SUMS, SMALL)?;

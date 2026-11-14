@@ -26,7 +26,10 @@ GREEN_JOBS = [job("shards / plan"), job("shards / ignored-tests-shards (horizon-
               job("linkage / route"), job("linkage / linkage x86_64-unknown-linux-gnu"),
               job("windows-runtime-leases / gate"), job("windows-runtime-leases / test", "skipped"),
               job("windows-runtime-leases / runtime-leases"), job("windows-runtime-leases / launcher-processes"),
+              job("machine-sample / route"), job("machine-sample / build"),
               job("sdk / fresh"), job("sdk / build linux"), job("sdk / publish", "skipped")]
+# Every other shard of the daily matrix, green (the summary expects each by name: summary.expected_shards).
+GREEN_JOBS += [job(name) for name in summary.expected_shards() if name != "shards / ignored-tests-shards (horizon-world)"]
 
 
 def shard_report(problems=(), passed=(), incomplete=()):
@@ -210,6 +213,59 @@ class DailySummaryTests(unittest.TestCase):
         self.assertIn("`Refusals by name`", bodies)
         self.assertIn("no daily run has been green yet", bodies)
 
+    def test_a_shard_killed_for_memory_says_by_what_with_its_memory_time_and_running_tests(self):
+        stuck = [f"game::slow::case_{n}" for n in range(7)]
+        incomplete = {"shard": "horizon-world", "reason": "a test process crashed", "ended_by": "signal 9 (SIGKILL)",
+                      "cargo_exit": 101, "wall_seconds": 4454, "memory_peak_bytes": 34359738368,
+                      "memory_max_bytes": 34359738368, "oom_kills": 1, "still_running": stuck,
+                      "still_running_more": 0, "never_reported": None}
+        jobs = [job("shards / ignored-tests-shards (horizon-world)", "failure",
+                    ["Run the ignored tests that need prepared data"])] + GREEN_JOBS[2:]
+        api = Api(jobs)
+        self.run_summary(api, [shard_report(incomplete=[incomplete])], results=dict(LEGS, shards={"result": "failure"}))
+        body = next(body["body"] for _, path, body in api.writes if path == "issues")
+        self.assertIn("a test run did not complete: `horizon-world` killed by signal 9 (SIGKILL), out of memory "
+                      "(1 kill by the kernel); job memory peak 32.0 GiB of 32.0 GiB; after 74 min; still running past "
+                      "60 s: `game::slow::case_0`, `game::slow::case_1`, `game::slow::case_2`, `game::slow::case_3`, "
+                      "`game::slow::case_4` and 2 more.", body)
+
+    def test_what_a_stopped_run_reports_is_shown_only_as_names_and_numbers(self):
+        self.assertEqual(summary.stopped_text({"shard": "horizon-client#2of2", "in_progress": True}),
+                         "`horizon-client#2of2` was still running when the leg ended (its time limit, a cancel, or a "
+                         "lost runner); which tests were running and the process's end are not known")
+        self.assertEqual(summary.stopped_text({"shard": "x", "reason": "listed tests never reported a result",
+                                               "cargo_exit": 0, "wall_seconds": 30, "never_reported": 2}),
+                         "`x`: listed tests never reported a result (cargo exit 0); after 30 s; "
+                         "2 listed tests never reported")
+        text = summary.stopped_text({"shard": "x`<b>", "reason": "PRIVATE: payload", "ended_by": "signal 9; rm",
+                                     "still_running": ["ok::name", "not a name", "ghp_x y"], "wall_seconds": "9",
+                                     "memory_peak_bytes": True, "oom_kills": -1})
+        self.assertEqual(text, "a run did not complete; still running past 60 s: `ok::name`")
+        self.assertEqual(summary.stopped_text({"shard": "x"}), "`x` did not complete")
+
+    def test_every_shard_of_the_matrix_must_report_by_name(self):
+        launcher = "shards / ignored-tests-shards (daily-rows-launcher)"
+        self.assertIn(launcher, summary.expected_shards())
+        _, out = self.run_summary(Api(GREEN_JOBS), [shard_report()])
+        self.assertIn("green=true", out)
+        # Every other job green, the launcher's shard absent: red, with one leg issue naming it.
+        api = Api([entry for entry in GREEN_JOBS if entry["name"] != launcher])
+        _, out = self.run_summary(api, [shard_report()])
+        self.assertIn("green=false", out)
+        self.assertEqual([body["title"] for _, path, body in api.writes if path == "issues"],
+                         [f"Daily: {launcher} did not complete"])
+        # A shard renamed in the workflow but not in the matrix's source: the expected name is missing.
+        renamed = [job("shards / ignored-tests-shards (daily-rows-tools)") if entry["name"] == launcher else entry
+                   for entry in GREEN_JOBS]
+        _, out = self.run_summary(Api(renamed), [shard_report()])
+        self.assertIn("green=false", out)
+
+    def test_a_stopped_runs_test_names_are_bounded_in_length(self):
+        long = "a" * 301
+        text = summary.stopped_text({"shard": "x", "still_running": [long, "ok::name"]})
+        self.assertEqual(text, "`x` did not complete; still running past 60 s: `ok::name`")
+        self.assertIn("a" * 300, summary.stopped_text({"shard": "x", "still_running": ["a" * 300]}))
+
     def test_a_skipped_leg_with_no_jobs_is_not_green(self):
         api = Api([job for job in GREEN_JOBS if not job["name"].startswith("shards")])
         _, out = self.run_summary(api, [], results=dict(LEGS, shards={"result": "skipped"}))
@@ -267,6 +323,30 @@ class DailySummaryTests(unittest.TestCase):
                 created = [body for _, path, body in api.writes if path == "issues"]
                 self.assertEqual([body["title"] for body in created], [f"Daily: {leg} did not complete"])
                 self.assertIn(f"`{helper}` failed", created[0]["body"])
+
+    def test_a_red_machine_sample_files_one_action_issue_naming_the_step_and_closes_when_green(self):
+        step = "The machine sample builds against this API"
+        jobs = [j for j in GREEN_JOBS if j["name"] != "machine-sample / build"] + [
+            job("machine-sample / build", "failure", [step])]
+        api = Api(jobs)
+        _, out = self.run_summary(api, [shard_report()], results=dict(LEGS, **{"machine-sample": {"result": "failure"}}),
+                                  merged=[4100, 4101])
+        self.assertIn("green=false", out)
+        created = [body for _, path, body in api.writes if path == "issues"]
+        self.assertEqual([body["title"] for body in created], ["Daily: update the machine sample for the mod API change"])
+        self.assertEqual(created[0]["labels"], ["bug"])
+        self.assertIn(f"`{step}`", created[0]["body"])
+        self.assertIn("#4100, #4101", created[0]["body"])
+        self.assertIn("check_machine_sample.py", created[0]["body"])
+        # Still red the next day: a comment on the same issue. Green: closed.
+        issue = [{"number": 77, "title": "Daily: update the machine sample for the mod API change", "body": "> filed"}]
+        api = Api(jobs, issues=issue)
+        self.run_summary(api, [shard_report()], results=dict(LEGS, **{"machine-sample": {"result": "failure"}}))
+        self.assertEqual([(m, p) for m, p, _ in api.writes], [("POST", "issues/77/comments")])
+        api = Api(GREEN_JOBS, issues=issue)
+        _, out = self.run_summary(api, [shard_report()])
+        self.assertIn("green=true", out)
+        self.assertIn(("PATCH", "issues/77"), [(m, p) for m, p, _ in api.writes])
 
     def test_a_skipped_sdk_build_is_green_only_when_fresh_found_the_release(self):
         jobs = [j for j in GREEN_JOBS if not j["name"].startswith("sdk / ")] + [

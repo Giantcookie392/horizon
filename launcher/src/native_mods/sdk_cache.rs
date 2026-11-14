@@ -22,6 +22,7 @@ use super::prebuilt::{Package, Route};
 use super::Target;
 use crate::i18n::{tr, trf};
 use crate::rust_toolchain;
+use horizon_mod_package::mod_surface;
 use horizon_mod_package::sdk::{self, Asset, Index, Kind, Side, INDEX};
 use horizon_release_sign::{PublicKey, SIGNATURE, SIGNATURE_V2, SUMS};
 use std::collections::BTreeMap;
@@ -33,7 +34,7 @@ use std::path::{Path, PathBuf};
 /// folders (and game releases' folders, for their build ids).
 pub const BASE_VAR: &str = "HORIZON_SDK_BASE";
 /// Where SDK releases are read from by default.
-const DEFAULT_BASE: &str = "https://github.com/arismoko/horizon/releases/download";
+const DEFAULT_BASE: &str = horizon_addresses::SDK_RELEASES;
 /// The most an index, checksum list or signature file is read to, in bytes.
 const SMALL: u64 = 1 << 20;
 /// The most a slice or the build data unpacks to: a corrupt or hostile archive stops there.

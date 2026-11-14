@@ -1969,7 +1969,7 @@ mod tests {
         std::fs::create_dir_all(&cwd).unwrap();
         let status = std::process::Command::new(std::env::current_exe().unwrap())
             .current_dir(&cwd)
-            .args(["--exact", test, "--nocapture"])
+            .args(["--include-ignored", "--exact", test, "--nocapture"])
             .env(mode, "1")
             .status()
             .unwrap();
@@ -2675,6 +2675,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn content_overlay_validates_dependencies_and_orders_layers() {
         const MODE: &str = "HORIZON_CONTENT_DEPENDENCY_TEST";
         if std::env::var_os(MODE).is_none() {
@@ -2747,6 +2748,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn native_content_follows_the_build_and_misplaced_content_follows_its_selection() {
         const MODE: &str = "HORIZON_MODS_SELECTION_TEST";
         let mode = std::env::var(MODE).ok();
@@ -2755,7 +2757,7 @@ mod tests {
             for mode in ["compiled", "vanilla"] {
                 let status = std::process::Command::new(std::env::current_exe().unwrap())
                     .current_dir(std::env::temp_dir())
-                    .args(["--exact", "game::mods::tests::native_content_follows_the_build_and_misplaced_content_follows_its_selection", "--nocapture"])
+                    .args(["--include-ignored", "--exact", "game::mods::tests::native_content_follows_the_build_and_misplaced_content_follows_its_selection", "--nocapture"])
                     .env(MODE, mode).status().unwrap();
                 assert!(status.success());
             }
@@ -2814,6 +2816,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn a_shared_missing_jar_stops_native_load_and_refuses_each_content_mod_row() {
         const MODE: &str = "HORIZON_JAR_REFUSAL_TEST";
         if std::env::var_os(MODE).is_none() {
