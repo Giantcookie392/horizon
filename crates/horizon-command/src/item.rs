@@ -33,6 +33,7 @@ pub const DECODED_COMPONENTS: &[&str] = &[
     "minecraft:custom_name",
     "minecraft:item_name",
     "minecraft:block_entity_data",
+    "minecraft:cooking_fuel",
 ];
 
 /// Validate and decode a component into the value representation shared with stacks.
@@ -41,6 +42,9 @@ pub const DECODED_COMPONENTS: &[&str] = &[
 pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Result<Tag, String> {
     if !DECODED_COMPONENTS.contains(&id) {
         return Ok(value.clone());
+    }
+    if id == "minecraft:cooking_fuel" {
+        return horizon_items::item_data::cooking_fuel::decode(value);
     }
     decode_component(id, value, reg)?;
     if id == "minecraft:block_entity_data" {
@@ -83,6 +87,7 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
 /// The codecs of the item components commands commonly set.
 pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), String> {
     match id {
+        "minecraft:cooking_fuel" => horizon_items::item_data::cooking_fuel::decode(t).map(|_| ()),
         "minecraft:damage" | "minecraft:repair_cost" => {
             let v = int_of(t).ok_or("Not a number")?;
             if v < 0 {

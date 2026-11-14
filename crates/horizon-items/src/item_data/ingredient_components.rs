@@ -40,6 +40,10 @@ pub fn removed(stack: &ItemStack, id: &str) -> bool {
 /// Presence is checked by the caller, so empty decoded enchantment maps compare equal.
 pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
     match id {
+        "minecraft:cooking_fuel" => super::cooking_fuel::equal(
+            a.data().and_then(|d| d.other(id)),
+            b.data().and_then(|d| d.other(id)),
+        ),
         "minecraft:damage" => a.damage == b.damage,
         "minecraft:repair_cost" => {
             a.data().map_or(0, |d| d.repair_cost) == b.data().map_or(0, |d| d.repair_cost)

@@ -54,9 +54,17 @@ Native registrations retain their persistent NBT validation contract.
 
 The shared decoder currently covers `damage`, `repair_cost`, `max_damage`,
 `max_stack_size`, `rarity`, `enchantments`, `stored_enchantments`, `custom_name`,
-`item_name`, and `block_entity_data` in the `minecraft` namespace. The other
-112 registered built-ins use stored-value matching while their shared decoders
-are added incrementally in **#3875**. Their absence is not a load refusal.
+`item_name`, `block_entity_data`, and `cooking_fuel` in the `minecraft` namespace.
+The other 111 registered built-ins use stored-value matching while their shared
+decoders are added incrementally in **#3875**. Their absence is not a load refusal.
+
+`cooking_fuel` requires both `burn_time` and `speed_multiplier`. Each accepts a
+numeric constant or a resource-key string (default namespace `minecraft`), without
+requiring the key to exist in a provider registry. Numeric constants use Java's
+boxed-number integer/float conversions, with no range restrictions or defaults;
+unknown record fields are ignored. Matching compares decoded constants or keys,
+including values retained on a live stack or inherited from its item prototype.
+This decoder does not change furnace gameplay.
 
 Component ingredient displays contain the patch, including removals. Difference
 lists retain the base list and remove only items whose default stack passes the
