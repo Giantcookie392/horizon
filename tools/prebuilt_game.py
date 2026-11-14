@@ -128,7 +128,10 @@ def tracked_blobs(root: Path, commit: str, paths: tuple[str, ...] = ()):
     the bytes GitHub's archive of the commit serves, which the launcher downloads and checks against the function
     index, whatever line endings the working tree was checked out with (Git for Windows' core.autocrlf) and whatever
     it has that is not committed. Links are left out, as the launcher's download leaves them out."""
-    process = subprocess.Popen(["git", "archive", "--format=tar", commit, *(["--", *paths] if paths else [])],
+    # `git archive` converts line endings as a checkout would (core.autocrlf, core.eol); both are turned off so the
+    # bytes are the commit's on every runner.
+    process = subprocess.Popen(["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf", "archive", "--format=tar",
+                                commit, *(["--", *paths] if paths else [])],
                                cwd=root, stdout=subprocess.PIPE)
     with tarfile.open(fileobj=process.stdout, mode="r|") as archive:
         for member in archive:
