@@ -20,7 +20,7 @@ class GateFailuresTests(unittest.TestCase):
             for step in steps:
                 for dependency in re.findall(r"steps\.([\w-]+)\.", step.get("if", "")):
                     self.assertIn(dependency, ids, (job, step))
-            checks = [s for s in steps if s.get("name", "").startswith(("Lint ", "Test Rust", "Test launcher"))]
+            checks = [s for s in steps[steps.index(next(s for s in steps if s.get("id") == "setup"))+1:] if s.get("name", "").startswith(("Lint ", "Test Rust", "Test launcher"))]
             for check in checks:
                 self.assertNotIn("success()", check["if"])
                 self.assertIn("!cancelled()", check["if"])

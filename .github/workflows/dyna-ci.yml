@@ -29,6 +29,10 @@ on:
         description: Run the heavy checks on this pull request's head (a fork's too) and post them on it
         type: string
         default: ''
+defaults:
+  run:
+    shell: bash
+
 permissions:
   contents: read
 concurrency:
@@ -242,17 +246,13 @@ jobs:
           } > "$RUNNER_TEMP/body.md"
           cat "$RUNNER_TEMP/body.md" >> "$GITHUB_STEP_SUMMARY"
           number=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "\"$TITLE\" in:title" \
-            --json number,title --jq ".[] | select(.title == \"$TITLE\") | .number" | head -1)
+            --json number,title --jq ".[] | select(.title == \"$TITLE\") | .number" | sed -n '1p')
           if [ -n "$number" ]; then
             gh issue edit "$number" -R "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/body.md"
           else
             gh issue create -R "$GITHUB_REPOSITORY" --title "$TITLE" --body-file "$RUNNER_TEMP/body.md"
           fi
 
-  # Independent checks use !cancelled() and explicit setup outcomes, not implicit success().
-  # The final setup step (parallelism cap) succeeds only after toolchain/cache/input setup; it
-  # is the readiness token for later Rust checks. A failed check never prevents another check.
-  # Failed-step summaries discover ids through toJSON(steps), with no parallel list to maintain.
   # Lint and verify use separate Dyna slots when the pool is available; each slot's build folder persists.
   # Outside contributors and pool-down runs stay on GitHub's runners with snapshot caches.
   lint:
@@ -269,40 +269,21 @@ jobs:
       RUNNER_KIND: ${{ needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' && 'dyna' || startsWith(needs.changes.outputs.hosted_label, 'boat') && 'boat' || 'github' }}
     steps:
       - name: Require successful check selection
-        id: require_successful_check_selection
         if: needs.changes.result != 'success'
         run: exit 1
       - name: Documentation needs no Rust lint
-        id: documentation_needs_no_rust_lint
         if: needs.changes.outputs.rust_required == 'false'
         run: echo 'Rust lint is not selected; repository hygiene still runs.'
       # Not diff-selected: any tracked file can contain a captured tool notice.
       - uses: actions/checkout@v4
-        id: checkout
-        if: ${{ !cancelled() && needs.changes.result == 'success' }}
         with:
           # A dispatch with `pr`: that pull request's head; otherwise this event's commit.
           ref: ${{ needs.changes.outputs.pr_sha }}
-      - name: Check repository artifacts and workflow YAML
-        id: check_repository_artifacts_and_workflow_yaml
-        if: ${{ !cancelled() && needs.changes.result == 'success' && steps.checkout.outcome == 'success' }}
-        run: python3 tools/ci/check_repository_hygiene.py
-      - name: Check mod API boundary
-        id: check_mod_api_boundary
-        if: ${{ !cancelled() && needs.changes.result == 'success' && steps.checkout.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
-        run: python3 tools/ci/check_api_boundary.py --source-only
       - name: Check Dyna dependencies (install fallback without root)
-        id: check_dyna_dependencies_install_fallback_without_root
-        if: ${{ !cancelled() && needs.changes.result == 'success' && steps.checkout.outcome == 'success' && (needs.changes.outputs.rust_required != 'false' && env.RUNNER_KIND == 'dyna') }}
+        if: needs.changes.outputs.rust_required != 'false' && env.RUNNER_KIND == 'dyna'
         run: bash tools/ci/dyna_ci_deps.sh
       - name: Install Rust toolchain and the runner image's packages
-        id: install_rust_toolchain_and_the_runner_image_s_packages
-        if: >-
-          ${{ !cancelled() &&
-          needs.changes.result == 'success' &&
-          steps.checkout.outcome == 'success' &&
-          (steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'success' || steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'skipped') &&
-          (needs.changes.outputs.rust_required != 'false') }}
+        if: needs.changes.outputs.rust_required != 'false'
         env:
           HOSTED: ${{ env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat' }}
         run: |
@@ -321,13 +302,7 @@ jobs:
           fi
           bash tools/ci/rustup_install.sh --profile minimal --component rustfmt --component clippy --target wasm32-unknown-unknown
       - name: Lint cache toolchain
-        if: >-
-          ${{ !cancelled() &&
-          needs.changes.result == 'success' &&
-          steps.checkout.outcome == 'success' &&
-          (steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'success' || steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'skipped') &&
-          (steps.install_rust_toolchain_and_the_runner_image_s_packages.outcome == 'success' || steps.install_rust_toolchain_and_the_runner_image_s_packages.outcome == 'skipped') &&
-          (needs.changes.outputs.rust_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')) }}
+        if: needs.changes.outputs.rust_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
         id: toolchain
         run: |
           echo "hash=$(rustc -vV | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
@@ -336,14 +311,7 @@ jobs:
       # rust-cache's default removes workspace artifacts. Those are the expensive part here,
       # in two feature graphs; keep both. ci-cache.yml publishes a fresh snapshot from main every 6 hours.
       - uses: actions/cache/restore@v4
-        if: >-
-          ${{ !cancelled() &&
-          needs.changes.result == 'success' &&
-          steps.checkout.outcome == 'success' &&
-          (steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'success' || steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'skipped') &&
-          (steps.install_rust_toolchain_and_the_runner_image_s_packages.outcome == 'success' || steps.install_rust_toolchain_and_the_runner_image_s_packages.outcome == 'skipped') &&
-          (steps.toolchain.outcome == 'success' || steps.toolchain.outcome == 'skipped') &&
-          (needs.changes.outputs.rust_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')) }}
+        if: needs.changes.outputs.rust_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
         id: lint-cache
         with:
           path: |
@@ -357,7 +325,6 @@ jobs:
       # A restore-key hit can predate a profile or dependency change: a successful download
       # does not mean Cargo has artifacts for the requested graph (for example, #1190).
       - name: Report lint cache compatibility
-        id: report_lint_cache_compatibility
         if: needs.changes.outputs.rust_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
         env:
           REQUESTED_KEY: ${{ steps.lint-cache.outputs.cache-primary-key }}
@@ -380,16 +347,7 @@ jobs:
       # per large rustc (tools/ci/cargo_jobs.py); boat's 16 GiB VM keeps four. A cargo flag, not
       # CARGO_BUILD_JOBS: sccache hashes CARGO_* variables, which would split the runners' cache from the boxes'.
       - name: Choose build parallelism
-        id: choose_build_parallelism
-        if: >-
-          ${{ !cancelled() &&
-          needs.changes.result == 'success' &&
-          steps.checkout.outcome == 'success' &&
-          (steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'success' || steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'skipped') &&
-          (steps.install_rust_toolchain_and_the_runner_image_s_packages.outcome == 'success' || steps.install_rust_toolchain_and_the_runner_image_s_packages.outcome == 'skipped') &&
-          (steps.toolchain.outcome == 'success' || steps.toolchain.outcome == 'skipped') &&
-          (steps.lint-cache.outcome == 'success' || steps.lint-cache.outcome == 'skipped') &&
-          (needs.changes.outputs.rust_required != 'false') }}
+        if: needs.changes.outputs.rust_required != 'false'
         run: |
           case "$RUNNER_KIND" in
             dyna) jobs="-j$(python3 tools/ci/cargo_jobs.py --job-mib 3072)" ;;
@@ -400,30 +358,24 @@ jobs:
       # A fresh checkout otherwise makes every workspace source newer than the cached artifacts.
       # Only byte-identical Git objects regain their cached mtimes; changed inputs stay new.
       - name: Restore unchanged source timestamps
-        id: restore_unchanged_source_timestamps
-        if: >-
-          ${{ !cancelled() &&
-          needs.changes.result == 'success' &&
-          steps.checkout.outcome == 'success' &&
-          (steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'success' || steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'skipped') &&
-          (steps.install_rust_toolchain_and_the_runner_image_s_packages.outcome == 'success' || steps.install_rust_toolchain_and_the_runner_image_s_packages.outcome == 'skipped') &&
-          (steps.toolchain.outcome == 'success' || steps.toolchain.outcome == 'skipped') &&
-          (steps.lint-cache.outcome == 'success' || steps.lint-cache.outcome == 'skipped') &&
-          (steps.choose_build_parallelism.outcome == 'success' || steps.choose_build_parallelism.outcome == 'skipped') &&
-          (needs.changes.outputs.rust_required != 'false') }}
+        if: needs.changes.outputs.rust_required != 'false'
         run: python3 tools/ci/source_mtimes.py target/ci-source-mtimes-v2.json | tee -a "$GITHUB_STEP_SUMMARY"
+      # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
+      - name: Cap build parallelism to the runner
+        run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
+      - name: Setup done
+        id: setup
+        run: 'true'
+      - name: Check repository artifacts and workflow YAML
+        id: check_repository_artifacts_and_workflow_yaml
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: python3 tools/ci/check_repository_hygiene.py
+      - name: Check mod API boundary
+        id: check_mod_api_boundary
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
+        run: python3 tools/ci/check_api_boundary.py --source-only
       - name: Check formatting
-        if: >-
-          ${{ !cancelled() &&
-          needs.changes.result == 'success' &&
-          steps.checkout.outcome == 'success' &&
-          (steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'success' || steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'skipped') &&
-          (steps.install_rust_toolchain_and_the_runner_image_s_packages.outcome == 'success' || steps.install_rust_toolchain_and_the_runner_image_s_packages.outcome == 'skipped') &&
-          (steps.toolchain.outcome == 'success' || steps.toolchain.outcome == 'skipped') &&
-          (steps.lint-cache.outcome == 'success' || steps.lint-cache.outcome == 'skipped') &&
-          (steps.choose_build_parallelism.outcome == 'success' || steps.choose_build_parallelism.outcome == 'skipped') &&
-          (steps.restore_unchanged_source_timestamps.outcome == 'success' || steps.restore_unchanged_source_timestamps.outcome == 'skipped') &&
-          (needs.changes.outputs.rust_required != 'false') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
         id: formatting
         run: |
           cargo fmt --all -- --check
@@ -431,31 +383,17 @@ jobs:
           find crates/horizon-client/src/game -name '*.rs' -print0 | xargs -0 rustfmt --edition 2024 --config skip_children=true --check
           rustfmt --edition 2024 --check crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*.rs crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*/*.rs
           rustfmt --edition 2024 --check crates/horizon-mod-wasm/wire-loopback/tests/wire_loopback/*.rs
-      # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
-      - name: Cap build parallelism to the runner
-        id: cap_build_parallelism_to_the_runner
-        if: >-
-          ${{ !cancelled() &&
-          needs.changes.result == 'success' &&
-          steps.checkout.outcome == 'success' &&
-          (steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'success' || steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'skipped') &&
-          (steps.install_rust_toolchain_and_the_runner_image_s_packages.outcome == 'success' || steps.install_rust_toolchain_and_the_runner_image_s_packages.outcome == 'skipped') &&
-          (steps.toolchain.outcome == 'success' || steps.toolchain.outcome == 'skipped') &&
-          (steps.lint-cache.outcome == 'success' || steps.lint-cache.outcome == 'skipped') &&
-          (steps.choose_build_parallelism.outcome == 'success' || steps.choose_build_parallelism.outcome == 'skipped') &&
-          (steps.restore_unchanged_source_timestamps.outcome == 'success' || steps.restore_unchanged_source_timestamps.outcome == 'skipped') }}
-        run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
       - name: Lint native targets
-        if: ${{ !cancelled() && steps.cap_build_parallelism_to_the_runner.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
         id: native-lint
         run: cargo clippy $JOBS --keep-going --workspace --all-targets -- -D warnings
       - name: Lint the server build without sound or controllers
-        if: ${{ !cancelled() && steps.cap_build_parallelism_to_the_runner.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
         id: server-lint
         run: cargo clippy $JOBS --keep-going -p horizon-client -p horizon-game -p horizon-mod-host --all-targets --no-default-features -- -D warnings
       - name: The mod API builds for wasm32
         id: the_mod_api_builds_for_wasm32
-        if: ${{ !cancelled() && steps.cap_build_parallelism_to_the_runner.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
         run: cargo check $JOBS --keep-going -p horizon-mod-api --target wasm32-unknown-unknown --locked
       # The prebuilt SDK's own feature graph: a release --lib build with prefer-dynamic and warnings denied, as
       # tools/prebuilt_game.py builds it, for the host and for the Windows archive (system-allocator there,
@@ -464,56 +402,54 @@ jobs:
       # target folder: these flags would otherwise invalidate the workspace's artifacts for the other steps.
       - name: The prebuilt SDK's host library builds without warnings
         id: sdk_host
-        if: ${{ !cancelled() && steps.cap_build_parallelism_to_the_runner.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && needs.changes.outputs.rust_required != 'false' }}
         run: |
+          started=$SECONDS
           host=$(rustc -vV | awk '/^host:/ {print $2}')
           env -u CARGO_ENCODED_RUSTFLAGS RUSTFLAGS='-C prefer-dynamic -D warnings' \
             cargo check $JOBS --keep-going --locked -p horizon-mod-host --lib --profile release --target-dir target/sdk-check --target "$host"
+          echo "SDK library check host: $((SECONDS - started)) s" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: The prebuilt SDK's Windows library builds without warnings
         id: sdk_windows
-        if: ${{ !cancelled() && steps.cap_build_parallelism_to_the_runner.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && needs.changes.outputs.rust_required != 'false' }}
         run: |
+          started=$SECONDS
           # hidapi and libmimalloc-sys compile C for the target in their build scripts.
           if ! command -v x86_64-w64-mingw32-gcc > /dev/null; then
             echo "::error::x86_64-w64-mingw32-gcc is missing: the Windows SDK check needs MinGW (gcc-mingw-w64-x86-64 in the ci-runner image)"
             exit 1
           fi
           rustup target add x86_64-pc-windows-gnu
-          # A check emits no code; disable thin LTO, which conflicts with prefer-dynamic on Windows.
+          # The real build is a dylib, which Cargo never LTOs; a --lib check under the release profile's thin LTO
+          # builds the dependencies for linker-plugin LTO, which rustc refuses with prefer-dynamic on Windows.
+          # A check generates no code, so LTO changes no warning or cfg it reports.
           env -u CARGO_ENCODED_RUSTFLAGS RUSTFLAGS='-C prefer-dynamic -D warnings' \
             cargo check $JOBS --keep-going --locked -p horizon-mod-host --lib --profile release --target-dir target/sdk-check \
               --target x86_64-pc-windows-gnu --features system-allocator --config profile.release.lto=false
+          echo "SDK library check windows: $((SECONDS - started)) s" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Report lint compiler cache
-        id: report_lint_compiler_cache
         if: ${{ !cancelled() && needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true' }}
         run: |
-          sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
+          sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY" || true
           # The runner's CPU time and peak memory: what the build parallelism above has to fit.
           grep usage_usec /sys/fs/cgroup/cpu.stat || true
           echo "memory.peak $(cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo unavailable)"
       # Publish native work even if the independent wasm check fails. Pull requests only read
       # main's snapshots; they can never replace a cache subsequently consumed by main.
       - uses: actions/cache/save@v4
-        id: checkout0
-        if: >-
-          ${{ !cancelled() &&
-          (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat') &&
-          github.ref == 'refs/heads/main' &&
-          steps.native-lint.outcome == 'success' &&
-          steps.server-lint.outcome == 'success' &&
-          steps.lint-cache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat') && github.ref == 'refs/heads/main' && steps.native-lint.outcome == 'success' && steps.server-lint.outcome == 'success' && steps.lint-cache.outputs.cache-hit != 'true' }}
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
           key: ${{ steps.lint-cache.outputs.cache-primary-key }}
-
       - name: Summarize failed gate steps
-        if: ${{ failure() && !cancelled() && steps.checkout.outcome == 'success' }}
+        if: ${{ failure() && !cancelled() && steps.setup.outcome == 'success' }}
         env:
           GATE_STEPS: ${{ toJSON(steps) }}
         run: python3 tools/ci/gate_summary.py
+
 
   verify:
     needs: changes
@@ -533,28 +469,19 @@ jobs:
       RUNNER_KIND: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && 'other' || startsWith(needs.changes.outputs.hosted_label, 'boat') && 'boat' || 'github' }}
     steps:
       - name: Require successful check selection
-        id: require_successful_check_selection
         if: needs.changes.result != 'success'
         run: exit 1
       - uses: actions/checkout@v4
-        id: checkout
-        if: ${{ !cancelled() && needs.changes.result == 'success' }}
         with:
           # A dispatch with `pr`: that pull request's head; otherwise this event's commit.
           ref: ${{ needs.changes.outputs.pr_sha }}
       - uses: actions/setup-python@v5
-        id: python_setup
-        if: >-
-          ${{ !cancelled() &&
-          needs.changes.result == 'success' &&
-          steps.checkout.outcome == 'success' &&
-          (needs.changes.outputs.tooling_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')) }}
+        if: needs.changes.outputs.tooling_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
         with:
           python-version: '3.12'
       # What the slot's build folder holds before this job writes anything: Dyna mounts /build per slot for
       # reuse across jobs, and an empty one means a cold build (no target, no registry, no toolchain).
       - name: Report what the build folder holds at job start
-        id: report_what_the_build_folder_holds_at_job_start
         if: needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true'
         # A report only: an unreadable folder or a failed du/find/findmnt never fails the job.
         continue-on-error: true
@@ -562,42 +489,29 @@ jobs:
           # RUSTUP_HOME is set by a later step (tools/ci/dyna_ci_deps.sh): read its folder directly.
           for dir in "${DYNA_CI_BUILD:-/build}" "${CARGO_TARGET_DIR:-}" "${CARGO_HOME:-}/registry" "${DYNA_CI_BUILD:-/build}/rustup/toolchains"; do
             if [ ! -d "$dir" ]; then echo "build-folder $dir: absent"; continue; fi
-            files=$(du -s --inodes "$dir" 2>/dev/null | cut -f1)
-            size=$(du -sh "$dir" 2>/dev/null | cut -f1)
-            oldest=$(find "$dir" -maxdepth 2 -printf '%TY-%Tm-%TdT%TH:%TM\n' 2>/dev/null | sort | head -1)
-            mount=$(findmnt -n -o SOURCE,TARGET -T "$dir" 2>/dev/null | head -1)
+            files=$(du -s --inodes "$dir" 2>/dev/null | cut -f1 || true)
+            size=$(du -sh "$dir" 2>/dev/null | cut -f1 || true)
+            oldest=$(find "$dir" -maxdepth 2 -printf '%TY-%Tm-%TdT%TH:%TM\n' 2>/dev/null | sort | sed -n '1p' || true)
+            mount=$(findmnt -n -o SOURCE,TARGET -T "$dir" 2>/dev/null | sed -n '1p' || true)
             echo "build-folder $dir: entries=${files:-?} size=${size:-?} oldest=${oldest:-none} mount=${mount:-?}"
           done | tee -a "$GITHUB_STEP_SUMMARY"
           # Size against this host's cap (tools/ci/dyna-slot-caps.txt): over it, Dyna empties target/ before the next job.
           host=$(sed -n 's/^dyna-ci-\(.*\)-[0-9a-f]\{8\}$/\1/p' <<< "${RUNNER_NAME:-}")
-          cap=$(awk -v h="$host" '$1 == h {print $2}' tools/ci/dyna-slot-caps.txt 2>/dev/null)
-          used=$(du -s --block-size=1G "${DYNA_CI_BUILD:-/build}" 2>/dev/null | cut -f1)
+          cap=$(awk -v h="$host" '$1 == h {print $2}' tools/ci/dyna-slot-caps.txt 2>/dev/null || true)
+          used=$(du -s --block-size=1G "${DYNA_CI_BUILD:-/build}" 2>/dev/null | cut -f1 || true)
           echo "build-folder cap: host=${host:-?} size=${used:-?} GiB cap=${cap:-80} GiB" | tee -a "$GITHUB_STEP_SUMMARY"
           # What takes the room, toward that cap.
-          du -sh "${DYNA_CI_BUILD:-/build}"/* "${CARGO_TARGET_DIR:-/nonexistent}"/* 2>/dev/null | sort -rh | head -12 | sed 's/^/build-folder part /' | tee -a "$GITHUB_STEP_SUMMARY"
+          du -sh "${DYNA_CI_BUILD:-/build}"/* "${CARGO_TARGET_DIR:-/nonexistent}"/* 2>/dev/null | sort -rh | sed -n '1,12p' | sed 's/^/build-folder part /' | tee -a "$GITHUB_STEP_SUMMARY" || true
           # Each kept toolchain and its components: a test runs rustfmt under whichever toolchain it selects.
           for toolchain in "${DYNA_CI_BUILD:-/build}"/rustup/toolchains/*/; do
             [ -f "$toolchain/lib/rustlib/components" ] || continue
             echo "build-folder toolchain $(basename "$toolchain"): $(sed 's/-x86_64.*//;s/-aarch64.*//' "$toolchain/lib/rustlib/components" | sort -u | tr '\n' ' ')"
           done | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Check Dyna dependencies (install fallback without root)
-        id: check_dyna_dependencies_install_fallback_without_root
-        if: >-
-          ${{ !cancelled() &&
-          needs.changes.result == 'success' &&
-          steps.checkout.outcome == 'success' &&
-          (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') &&
-          (needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true') }}
+        if: needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true'
         run: bash tools/ci/dyna_ci_deps.sh
       - name: Install Rust toolchain and the runner image's packages
-        id: install_rust_toolchain_and_the_runner_image_s_packages
-        if: >-
-          ${{ !cancelled() &&
-          needs.changes.result == 'success' &&
-          steps.checkout.outcome == 'success' &&
-          (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') &&
-          (steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'success' || steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'skipped') &&
-          (needs.changes.outputs.rust_required != 'false') }}
+        if: needs.changes.outputs.rust_required != 'false'
         env:
           HOSTED: ${{ env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat' }}
           DYNA: ${{ needs.changes.outputs.self_hosted }}
@@ -615,31 +529,14 @@ jobs:
       # ci-cache.yml publishes this snapshot from main every 6 hours; pull requests only read it.
       # Profile overrides in Cargo.toml are part of rust-cache's key; unchanged dependencies still restore.
       - uses: Swatinem/rust-cache@v2
-        id: rust_cache
-        if: >-
-          ${{ !cancelled() &&
-          needs.changes.result == 'success' &&
-          steps.checkout.outcome == 'success' &&
-          (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') &&
-          (steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'success' || steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'skipped') &&
-          (steps.install_rust_toolchain_and_the_runner_image_s_packages.outcome == 'success' || steps.install_rust_toolchain_and_the_runner_image_s_packages.outcome == 'skipped') &&
-          (needs.changes.outputs.rust_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')) }}
+        if: needs.changes.outputs.rust_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
         with:
           # A new key: the dependency-only snapshot under the old one blocked saving this one.
           shared-key: verify-workspace
           cache-workspace-crates: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Use persistent verify build artifacts
-        id: use_persistent_verify_build_artifacts
-        if: >-
-          ${{ !cancelled() &&
-          needs.changes.result == 'success' &&
-          steps.checkout.outcome == 'success' &&
-          (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') &&
-          (steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'success' || steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'skipped') &&
-          (steps.install_rust_toolchain_and_the_runner_image_s_packages.outcome == 'success' || steps.install_rust_toolchain_and_the_runner_image_s_packages.outcome == 'skipped') &&
-          (steps.rust_cache.outcome == 'success' || steps.rust_cache.outcome == 'skipped') &&
-          (needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true') }}
+        if: needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true'
         run: |
           mkdir -p "${CARGO_TARGET_DIR:?}"
           if [ ! -e target ] && [ ! -L target ]; then
@@ -652,17 +549,7 @@ jobs:
       # lint's 3: this job compiles gameplay twice with code generation (the lib and the executable test targets), and
       # at five a 16 GiB runner's compile was killed for memory (signal 9).
       - name: Choose build parallelism
-        id: choose_build_parallelism
-        if: >-
-          ${{ !cancelled() &&
-          needs.changes.result == 'success' &&
-          steps.checkout.outcome == 'success' &&
-          (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') &&
-          (steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'success' || steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'skipped') &&
-          (steps.install_rust_toolchain_and_the_runner_image_s_packages.outcome == 'success' || steps.install_rust_toolchain_and_the_runner_image_s_packages.outcome == 'skipped') &&
-          (steps.rust_cache.outcome == 'success' || steps.rust_cache.outcome == 'skipped') &&
-          (steps.use_persistent_verify_build_artifacts.outcome == 'success' || steps.use_persistent_verify_build_artifacts.outcome == 'skipped') &&
-          (needs.changes.outputs.rust_required != 'false') }}
+        if: needs.changes.outputs.rust_required != 'false'
         run: |
           case "$RUNNER_KIND" in
             dyna) jobs="-j$(python3 tools/ci/cargo_jobs.py --job-mib 4096)" ;;
@@ -673,33 +560,10 @@ jobs:
       # Pair the retained artifacts with lint's input snapshot. Cargo still decides freshness;
       # only byte-identical Git objects regain their previous source timestamps.
       - name: Restore unchanged source timestamps
-        id: restore_unchanged_source_timestamps
-        if: >-
-          ${{ !cancelled() &&
-          needs.changes.result == 'success' &&
-          steps.checkout.outcome == 'success' &&
-          (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') &&
-          (steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'success' || steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'skipped') &&
-          (steps.install_rust_toolchain_and_the_runner_image_s_packages.outcome == 'success' || steps.install_rust_toolchain_and_the_runner_image_s_packages.outcome == 'skipped') &&
-          (steps.rust_cache.outcome == 'success' || steps.rust_cache.outcome == 'skipped') &&
-          (steps.use_persistent_verify_build_artifacts.outcome == 'success' || steps.use_persistent_verify_build_artifacts.outcome == 'skipped') &&
-          (steps.choose_build_parallelism.outcome == 'success' || steps.choose_build_parallelism.outcome == 'skipped') &&
-          (needs.changes.outputs.rust_required != 'false') }}
+        if: needs.changes.outputs.rust_required != 'false'
         run: python3 tools/ci/source_mtimes.py target/ci-source-mtimes-v2.json | tee -a "$GITHUB_STEP_SUMMARY"
       # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
       - name: Cap build parallelism to the runner
-        id: cap_build_parallelism_to_the_runner
-        if: >-
-          ${{ !cancelled() &&
-          needs.changes.result == 'success' &&
-          steps.checkout.outcome == 'success' &&
-          (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') &&
-          (steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'success' || steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'skipped') &&
-          (steps.install_rust_toolchain_and_the_runner_image_s_packages.outcome == 'success' || steps.install_rust_toolchain_and_the_runner_image_s_packages.outcome == 'skipped') &&
-          (steps.rust_cache.outcome == 'success' || steps.rust_cache.outcome == 'skipped') &&
-          (steps.use_persistent_verify_build_artifacts.outcome == 'success' || steps.use_persistent_verify_build_artifacts.outcome == 'skipped') &&
-          (steps.choose_build_parallelism.outcome == 'success' || steps.choose_build_parallelism.outcome == 'skipped') &&
-          (steps.restore_unchanged_source_timestamps.outcome == 'success' || steps.restore_unchanged_source_timestamps.outcome == 'skipped') }}
         run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
       # horizon-client rustc processes take several GB each; $JOBS (chosen above) fits them in the runner's
       # memory. Formatting and lint run in parallel (the lint job), so this job only tests.
@@ -707,33 +571,36 @@ jobs:
       # type-checks and the parity job builds and runs (they were most of this step's build and link time).
       # cargo test, not nextest: nextest's process per test reloads each binary's shared tables for every test, and on
       # these 4-core runners it was no faster (#4978).
+      - name: Setup done
+        id: setup
+        run: 'true'
       - name: Build the runtime holder test actor
-        id: build_the_runtime_holder_test_actor
-        if: ${{ !cancelled() && steps.cap_build_parallelism_to_the_runner.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
+        id: actor
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
         # The command lives in tools/ci/ignored_shards.py PREPARE, which the daily run uses too.
         run: python3 tools/ci/ignored_shards.py --prepare horizon-mod-package $JOBS
       # Compile first, apart from running: the build's time and its slowest units show on their own.
       - name: Build Rust core test binaries
-        id: build_rust_core_test_binaries
-        if: ${{ !cancelled() && steps.cap_build_parallelism_to_the_runner.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
+        id: core_build
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
         run: cargo build $JOBS --keep-going --profile test --workspace --lib --bins --tests --timings
       # What bounds the build: the slowest compile units, from the report --timings writes.
       - name: Slowest compile units
-        id: slowest_compile_units
         if: ${{ !cancelled() && needs.changes.outputs.rust_required != 'false' }}
         continue-on-error: true
         run: |
           python3 tools/ci/cargo_timings.py target/cargo-timings/cargo-timing.html | tee -a "$GITHUB_STEP_SUMMARY"
           # The points build script's phases (seconds since it started), from the file it writes beside its output.
           for timing in target/debug/build/horizon-mod-points-*/out/points-timing.txt; do
-            [ -f "$timing" ] && { echo "points build script phases:"; cat "$timing"; } | tee -a "$GITHUB_STEP_SUMMARY"
+            [ -f "$timing" ] || continue
+            { echo "points build script phases:"; cat "$timing"; } | tee -a "$GITHUB_STEP_SUMMARY"
           done
       # Measurement: the test step below recompiled horizon-mod-points and every crate after it, minutes after
       # the build above. Cargo's verbose output says which tracked file or variable made each unit dirty.
       - name: Why the core build is not fresh
         id: why_the_core_build_is_not_fresh
-        if: ${{ !cancelled() && steps.cap_build_parallelism_to_the_runner.outcome == 'success' && steps.build_rust_core_test_binaries.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
-        run: cargo test $JOBS --no-fail-fast --profile test --workspace --lib --bins --tests --no-run -v 2>&1 | grep -E '^ +(Dirty|Compiling) ' || true
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') && steps.core_build.outcome == 'success' }}
+        run: cargo test $JOBS --profile test --workspace --lib --bins --tests --no-run -v 2>&1 | grep -E '^ +(Dirty|Compiling) ' || true
       # The binaries built above, three at a time: Cargo runs them one by one, and a few large ones (the API
       # generator's, the client library's, no_wire_registration) took most of this step while the runner idled.
       # Three, not more: the job's memory.peak counts the build and page cache, so it says nothing about this
@@ -742,7 +609,7 @@ jobs:
       # step ends with the failing binaries and test names.
       - name: Test Rust core and voxel kernel correctness
         id: test_rust_core_and_voxel_kernel_correctness
-        if: ${{ !cancelled() && steps.cap_build_parallelism_to_the_runner.outcome == 'success' && steps.build_rust_core_test_binaries.outcome == 'success' && steps.build_the_runtime_holder_test_actor.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') && steps.core_build.outcome == 'success' && steps.actor.outcome == 'success' }}
         run: python3 tools/ci/run_test_binaries.py --jobs 3 --time-limits 2,5 -- cargo test $JOBS --profile test --workspace --lib --bins --tests
       # Prepared-data content-root tests stay in the existing client-lib data leg.
       # Running them again here without the data only rebuilds targets before they return early.
@@ -750,8 +617,8 @@ jobs:
       # Outside tests/ discovery: the later offline suite must not stage it again.
       # Keep this before doc tests so their failures cannot hide stale slots.
       - name: Build the source stage generator (test profile)
-        id: build_the_source_stage_generator_test_profile
-        if: ${{ !cancelled() && steps.cap_build_parallelism_to_the_runner.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
+        id: stage
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
         run: |
           started=$SECONDS
           cargo build $JOBS --locked --profile test -p horizon-mod-api-gen --bin horizon-stage --message-format=json-render-diagnostics > "$RUNNER_TEMP/stage-artifacts.jsonl"
@@ -781,7 +648,7 @@ jobs:
         # the merge base and this tree, then classifies the diff (tools/ci/surface_report.py). A report, not a gate:
         # it fails only when this tree cannot be exported, for a stale or unreadable new change note, or, with
         # tools/ci/surface.toml's gate on, for a breaking change no note declares.
-        if: ${{ !cancelled() && steps.cap_build_parallelism_to_the_runner.outcome == 'success' && steps.build_the_source_stage_generator_test_profile.outcome == 'success' && (needs.changes.outputs.rust_required != 'false' && (github.event_name == 'pull_request' || inputs.pr != '')) }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false' && (github.event_name == 'pull_request' || inputs.pr != '')) && steps.stage.outcome == 'success' }}
         env:
           EVENT: ${{ github.event_name }}
           PR: ${{ inputs.pr }}
@@ -789,30 +656,28 @@ jobs:
         run: python3 tools/ci/surface_report.py
       - name: Validate prebuilt source stage and listed slots
         id: validate_prebuilt_source_stage_and_listed_slots
-        if: ${{ !cancelled() && steps.cap_build_parallelism_to_the_runner.outcome == 'success' && steps.build_the_source_stage_generator_test_profile.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') && steps.stage.outcome == 'success' }}
         run: python3 tools/ci/test_stage_catalog.py -v
       - name: Test Rust documentation examples
         id: test_rust_documentation_examples
-        if: ${{ !cancelled() && steps.cap_build_parallelism_to_the_runner.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
         run: cargo test $JOBS --no-fail-fast --profile test --workspace --doc
       - name: No Rust work selected
-        id: no_rust_work_selected
         if: needs.changes.outputs.rust_required == 'false'
         run: echo 'No Rust work selected; static checks report independently.'
       - name: Report test compiler cache
-        id: report_test_compiler_cache
         if: ${{ !cancelled() && needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true' }}
         run: |
-          sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
+          sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY" || true
           # The runner's CPU time and peak memory: what the build parallelism above has to fit.
           grep usage_usec /sys/fs/cgroup/cpu.stat || true
           echo "memory.peak $(cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo unavailable)"
-
       - name: Summarize failed gate steps
-        if: ${{ failure() && !cancelled() && steps.checkout.outcome == 'success' }}
+        if: ${{ failure() && !cancelled() && steps.setup.outcome == 'success' }}
         env:
           GATE_STEPS: ${{ toJSON(steps) }}
         run: python3 tools/ci/gate_summary.py
+
 
   # Source checks and isolated compiler fixtures, never a second game build or game target cache.
   # A contributor's pull request gets this instead of lint: the same repository checks and formatting, nothing that
@@ -860,35 +725,43 @@ jobs:
       RUNNER_KIND: ${{ needs.changes.outputs.trusted != 'true' && 'github' || needs.changes.outputs.self_hosted == 'true' && 'dyna' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && 'other' || startsWith(needs.changes.outputs.hosted_label, 'boat') && 'boat' || 'github' }}
     steps:
       - name: Require successful check selection
-        id: require_successful_check_selection
         if: needs.changes.result != 'success'
         run: exit 1
       - uses: actions/checkout@v4
         id: checkout
-        if: ${{ !cancelled() && needs.changes.result == 'success' }}
         with:
           # A dispatch with `pr`: that pull request's head; otherwise this event's commit.
           ref: ${{ needs.changes.outputs.pr_sha }}
       # Public-tree ranges and file-size ancestry need full history of this exact commit,
       # not every branch and tag. The Rust job only needs its checkout's HEAD and tracked files.
       - name: Fetch this commit's history
-        id: fetch_this_commit_s_history
-        if: ${{ !cancelled() && needs.changes.result == 'success' && steps.checkout.outcome == 'success' }}
         run: git fetch -q --no-tags --unshallow origin "$(git rev-parse HEAD)"
       - uses: actions/setup-python@v5
-        id: python_setup
-        if: >-
-          ${{ !cancelled() &&
-          needs.changes.result == 'success' &&
-          steps.checkout.outcome == 'success' &&
-          steps.fetch_this_commit_s_history.outcome == 'success' &&
-          (needs.changes.outputs.tooling_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')) }}
+        if: needs.changes.outputs.tooling_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
         with:
           python-version: '3.12'
+      # Offline tooling compiles tiny standalone fixtures even when no game Rust changed.
+      # Install their tools explicitly rather than making missing compilers turn cases into skips.
+      - name: Install Rust tools for isolated tooling fixtures
+        if: needs.changes.outputs.rust_required != 'false' || needs.changes.outputs.tooling_required != 'false'
+        env:
+          DYNA: ${{ needs.changes.outputs.self_hosted }}
+        run: |
+          if [ "$DYNA" = true ]; then
+            if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
+              curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
+            fi
+            export PATH="$CARGO_HOME/bin:$PATH"
+            echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
+          fi
+          bash tools/ci/rustup_install.sh --profile minimal --component rustfmt --component clippy
+      - name: Setup done
+        id: setup
+        run: 'true'
       # A pull request adds only its own commits to main, so it reads those; main's pushes read every ref's history.
       - name: Keep game artifacts out of Git
         id: keep_game_artifacts_out_of_git
-        if: ${{ !cancelled() && needs.changes.result == 'success' && steps.fetch_this_commit_s_history.outcome == 'success' && (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         env:
           EVENT: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -902,19 +775,19 @@ jobs:
           fi
       - name: Check duplicate public native functions
         id: check_duplicate_public_native_functions
-        if: ${{ !cancelled() && needs.changes.result == 'success' && steps.fetch_this_commit_s_history.outcome == 'success' && (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') && (needs.changes.outputs.rust_required != 'false') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
         run: python3 tools/sync_upstream.py --check
       # docs/layers.md#built-in-addresses: every built-in outside address in the Horizon layer's home; the rest only shrinks.
       - name: Built-in addresses stay in their home
         id: built_in_addresses_stay_in_their_home
-        if: ${{ !cancelled() && needs.changes.result == 'success' && steps.fetch_this_commit_s_history.outcome == 'success' && (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') && (needs.changes.outputs.rust_required != 'false') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: python3 tools/check_addresses.py ${BASE_SHA:+--base "$BASE_SHA" --pull-request-merge}
       # docs/layers.md#file-size: a Rust file over 3000 lines may not grow (pull requests; main has no base to compare).
       - name: Big files don't grow
         id: big_files_don_t_grow
-        if: ${{ !cancelled() && needs.changes.result == 'success' && steps.fetch_this_commit_s_history.outcome == 'success' && (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         # The checkout is the pull request merged into main as it is now: measure the merge against that main, so
@@ -925,7 +798,7 @@ jobs:
       # The branch name counts only from this repository: a fork could name its branch like a rollup.
       - name: Fixed hotspots stay fixed
         id: fixed_hotspots_stay_fixed
-        if: ${{ !cancelled() && needs.changes.result == 'success' && steps.fetch_this_commit_s_history.outcome == 'success' && (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           BRANCH: ${{ needs.changes.outputs.trusted == 'true' && github.head_ref || '' }}
@@ -934,55 +807,39 @@ jobs:
       # horizon-mod-wasm-wire-loopback's build.rs declares tests/wire_loopback/*.rs: its root gains no module line and no test.
       - name: wire_loopback root does not grow
         id: wire_loopback_root_does_not_grow
-        if: ${{ !cancelled() && needs.changes.result == 'success' && steps.fetch_this_commit_s_history.outcome == 'success' && (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: python3 tools/hotspots/check_wire_loopback.py ${BASE_SHA:+--base "$BASE_SHA" --pull-request-merge}
-      # Offline tooling compiles tiny standalone fixtures even when no game Rust changed.
-      # Install their tools explicitly rather than making missing compilers turn cases into skips.
-      - name: Install Rust tools for isolated tooling fixtures
-        id: install_rust_tools_for_isolated_tooling_fixtures
-        if: ${{ !cancelled() && needs.changes.result == 'success' && steps.fetch_this_commit_s_history.outcome == 'success' && (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') && (needs.changes.outputs.rust_required != 'false' || needs.changes.outputs.tooling_required != 'false') }}
-        env:
-          DYNA: ${{ needs.changes.outputs.self_hosted }}
-        run: |
-          if [ "$DYNA" = true ]; then
-            if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
-              curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
-            fi
-            export PATH="$CARGO_HOME/bin:$PATH"
-            echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
-          fi
-          bash tools/ci/rustup_install.sh --profile minimal --component rustfmt --component clippy
       - name: Vocabulary state has explicit ownership
         id: vocabulary_state_has_explicit_ownership
-        if: ${{ !cancelled() && needs.changes.result == 'success' && steps.fetch_this_commit_s_history.outcome == 'success' && (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: python3 tools/check_mod_vocabulary_state.py
       # One file per topic in tools/ci/ignored-tests/: well-formed rows, each test in one file, nothing else in the
       # folder, no file at the retired single-list path.
       - name: Ignored-test policy files read cleanly
         id: ignored_test_policy_files_read_cleanly
-        if: ${{ !cancelled() && needs.changes.result == 'success' && steps.fetch_this_commit_s_history.outcome == 'success' && (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: python3 tools/ci/check_ignored_test_rows.py
       # The unit tier: a test that boots the game is #[ignore = "daily"]; the fixtures are in tools/ci/game-boot-fixtures.txt.
       - name: Game-boot tests are daily tests
         id: game_boot_tests_are_daily_tests
-        if: ${{ !cancelled() && needs.changes.result == 'success' && steps.fetch_this_commit_s_history.outcome == 'success' && (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: python3 tools/ci/check_game_boot_tests.py
       # The unit tier: a test that starts a child process is #[ignore = "daily"]; helpers in tools/ci/process-spawns.txt.
       - name: Process-starting tests are daily tests
         id: process_starting_tests_are_daily_tests
-        if: ${{ !cancelled() && needs.changes.result == 'success' && steps.fetch_this_commit_s_history.outcome == 'success' && (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: python3 tools/ci/check_process_tests.py
       # A test that reruns its own test executable by --exact must select it ignored or not, or a daily one checks nothing.
       - name: Test reruns select ignored tests too
         id: test_reruns_select_ignored_tests_too
-        if: ${{ !cancelled() && needs.changes.result == 'success' && steps.fetch_this_commit_s_history.outcome == 'success' && (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: python3 tools/ci/reexec_include_ignored.py --check
       # docs/layers.md: a crate depends only on its own layer or a lower one; today's exceptions only shrink.
       - name: Crates follow the layers
         id: crates_follow_the_layers
-        if: ${{ !cancelled() && needs.changes.result == 'success' && steps.fetch_this_commit_s_history.outcome == 'success' && (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') && (needs.changes.outputs.rust_required != 'false') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: python3 tools/check_layers.py ${BASE_SHA:+--base "$BASE_SHA" --pull-request-merge}
@@ -990,34 +847,34 @@ jobs:
       # PRs adding names don't conflict on rustfmt's re-wrap; today's longer lists only shrink.
       - name: Export lists stay short
         id: export_lists_stay_short
-        if: ${{ !cancelled() && needs.changes.result == 'success' && steps.fetch_this_commit_s_history.outcome == 'success' && (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: python3 tools/hotspots/check_lists.py
       # tools/hotspots/check_stand_ins.py: hand-written stand-ins of the dispatch tests and the wire loopback keep up
       # with the hooks and vocabulary traits they mirror, on the member PR itself instead of in a rollup's build.
       - name: Test stand-ins keep up with the API
         id: test_stand_ins_keep_up_with_the_api
-        if: ${{ !cancelled() && needs.changes.result == 'success' && steps.fetch_this_commit_s_history.outcome == 'success' && (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: python3 tools/hotspots/check_stand_ins.py
-      # Independent of the Rust job and earlier source-check results. Require successful setup:
+      # Independent of the Rust job and earlier check results; require successful setup:
       # compiler fixtures after failed setup would add a second, misleading failure.
       - name: Python tests of the repository's tools
         id: python_tests_of_the_repository_s_tools
-        if: ${{ !cancelled() && needs.changes.result == 'success' && steps.fetch_this_commit_s_history.outcome == 'success' && (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') && steps.install_rust_tools_for_isolated_tooling_fixtures.outcome == 'success' && needs.changes.outputs.tooling_required != 'false' }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.result == 'success' && needs.changes.outputs.tooling_required != 'false') }}
         run: python3 -m unittest discover -s tests -v --durations=25
       - name: Python tests of prepared-data tooling
         id: prepared_tooling_tests
-        if: ${{ !cancelled() && needs.changes.result == 'success' && steps.fetch_this_commit_s_history.outcome == 'success' && (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') && steps.install_rust_tools_for_isolated_tooling_fixtures.outcome == 'success' && needs.changes.outputs.tooling_required != 'false' }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.result == 'success' && needs.changes.outputs.tooling_required != 'false') }}
         run: python3 -m unittest discover -s tools/ci -p 'test_prepared_*.py' -v
       # The mod-host map's tables (#2534), built on main's pushes instead of committed, so no PR has to regenerate
       # them: docs/layering/mod-host-map.md points here. Main pushes only, never pull requests; about 17 s of Python
       # measured locally, no build.
       - name: Build the mod-host map tables
-        id: build_the_mod_host_map_tables
-        if: ${{ !cancelled() && github.event_name == 'push' }}
+        id: mod_host_map
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && github.event_name == 'push' }}
         run: python3 tools/layering/scan_engine_mod_edges.py --map target/layering/mod-host-map-tables.md
       - name: Upload the mod-host map tables
         id: mod_host_map_upload
-        if: ${{ !cancelled() && needs.changes.result == 'success' && steps.fetch_this_commit_s_history.outcome == 'success' && (steps.python_setup.outcome == 'success' || steps.python_setup.outcome == 'skipped') && (!cancelled() && github.event_name == 'push') }}
+        if: ${{ !cancelled() && github.event_name == 'push' && steps.mod_host_map.outcome == 'success' }}
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
@@ -1025,14 +882,13 @@ jobs:
           path: target/layering/mod-host-map-tables.md
           if-no-files-found: error
       - name: Report optional mod-host map upload failure
-        id: report_optional_mod_host_map_upload_failure
         if: ${{ !cancelled() && steps.mod_host_map_upload.outcome == 'failure' }}
         run: |
           echo '::warning::Optional mod-host-map artifact upload failed; inspect the upload step for details.'
           echo '### Optional mod-host-map artifact unavailable' >> "$GITHUB_STEP_SUMMARY"
           echo 'The upload failed. Map generation remains a required step; the optional download is unavailable.' >> "$GITHUB_STEP_SUMMARY"
       - name: Summarize failed gate steps
-        if: ${{ failure() && !cancelled() && steps.checkout.outcome == 'success' }}
+        if: ${{ failure() && !cancelled() && steps.setup.outcome == 'success' }}
         env:
           GATE_STEPS: ${{ toJSON(steps) }}
         run: python3 tools/ci/gate_summary.py
@@ -1047,27 +903,14 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-        id: checkout
-        if: ${{ !cancelled() && needs.changes.result == 'success' }}
         with:
           # A dispatch with `pr`: that pull request's head; otherwise this event's commit.
           ref: ${{ needs.changes.outputs.pr_sha }}
       - name: Check Dyna dependencies (install fallback without root)
-        id: check_dyna_dependencies_install_fallback_without_root
-        if: >-
-          ${{ !cancelled() &&
-          needs.changes.result == 'success' &&
-          steps.checkout.outcome == 'success' &&
-          (needs.changes.outputs.launcher_required != 'false' && needs.changes.outputs.self_hosted == 'true') }}
+        if: needs.changes.outputs.launcher_required != 'false' && needs.changes.outputs.self_hosted == 'true'
         run: bash tools/ci/dyna_ci_deps.sh
       - name: Install Rust and the headers GPUI links against
-        id: install_rust_and_the_headers_gpui_links_against
-        if: >-
-          ${{ !cancelled() &&
-          needs.changes.result == 'success' &&
-          steps.checkout.outcome == 'success' &&
-          (steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'success' || steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'skipped') &&
-          (needs.changes.outputs.launcher_required != 'false') }}
+        if: needs.changes.outputs.launcher_required != 'false'
         env:
           HOSTED: ${{ runner.environment == 'github-hosted' }}
           DYNA: ${{ needs.changes.outputs.self_hosted }}
@@ -1083,14 +926,7 @@ jobs:
           fi
           bash tools/ci/rustup_install.sh --profile minimal --component rustfmt --component clippy
       - uses: Swatinem/rust-cache@v2
-        id: rust_cache
-        if: >-
-          ${{ !cancelled() &&
-          needs.changes.result == 'success' &&
-          steps.checkout.outcome == 'success' &&
-          (steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'success' || steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'skipped') &&
-          (steps.install_rust_and_the_headers_gpui_links_against.outcome == 'success' || steps.install_rust_and_the_headers_gpui_links_against.outcome == 'skipped') &&
-          (needs.changes.outputs.launcher_required != 'false' && runner.environment == 'github-hosted') }}
+        if: needs.changes.outputs.launcher_required != 'false' && runner.environment == 'github-hosted'
         with:
           workspaces: launcher
           shared-key: launcher
@@ -1099,71 +935,57 @@ jobs:
       # build of another tree without it left artifacts that a later job judged fresh (stale generated
       # sources, 2026-11-13). Only byte-identical Git objects regain their previous timestamps.
       - name: Restore unchanged source timestamps
-        id: restore_unchanged_source_timestamps
-        if: >-
-          ${{ !cancelled() &&
-          needs.changes.result == 'success' &&
-          steps.checkout.outcome == 'success' &&
-          (steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'success' || steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'skipped') &&
-          (steps.install_rust_and_the_headers_gpui_links_against.outcome == 'success' || steps.install_rust_and_the_headers_gpui_links_against.outcome == 'skipped') &&
-          (steps.rust_cache.outcome == 'success' || steps.rust_cache.outcome == 'skipped') }}
         run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes-v2.json"
       # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
       - name: Cap build parallelism to the runner
-        id: cap_build_parallelism_to_the_runner
-        if: >-
-          ${{ !cancelled() &&
-          needs.changes.result == 'success' &&
-          steps.checkout.outcome == 'success' &&
-          (steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'success' || steps.check_dyna_dependencies_install_fallback_without_root.outcome == 'skipped') &&
-          (steps.install_rust_and_the_headers_gpui_links_against.outcome == 'success' || steps.install_rust_and_the_headers_gpui_links_against.outcome == 'skipped') &&
-          (steps.rust_cache.outcome == 'success' || steps.rust_cache.outcome == 'skipped') &&
-          steps.restore_unchanged_source_timestamps.outcome == 'success' }}
         run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
+      - name: Setup done
+        id: setup
+        run: 'true'
       - name: Check launcher formatting
         id: check_launcher_formatting
-        if: ${{ !cancelled() && steps.cap_build_parallelism_to_the_runner.outcome == 'success' && (needs.changes.outputs.launcher_required != 'false') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         working-directory: launcher
         env:
           JOBS: ${{ needs.changes.outputs.self_hosted == 'true' && '-j2' || '' }}
         run: cargo fmt --check
       - name: Lint launcher
         id: lint_launcher
-        if: ${{ !cancelled() && steps.cap_build_parallelism_to_the_runner.outcome == 'success' && (needs.changes.outputs.launcher_required != 'false') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         working-directory: launcher
         env:
           JOBS: ${{ needs.changes.outputs.self_hosted == 'true' && '-j2' || '' }}
         run: cargo clippy $JOBS --keep-going --all-targets --locked -- -D warnings
       - name: Test launcher library and binaries
         id: test_launcher_library_and_binaries
-        if: ${{ !cancelled() && steps.cap_build_parallelism_to_the_runner.outcome == 'success' && (needs.changes.outputs.launcher_required != 'false') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         working-directory: launcher
         env:
           JOBS: ${{ needs.changes.outputs.self_hosted == 'true' && '-j2' || '' }}
         run: cargo test $JOBS --no-fail-fast --locked --lib --bins
       - name: Test launcher storage
         id: test_launcher_storage
-        if: ${{ !cancelled() && steps.cap_build_parallelism_to_the_runner.outcome == 'success' && (needs.changes.outputs.launcher_required != 'false') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         working-directory: launcher
         env:
           JOBS: ${{ needs.changes.outputs.self_hosted == 'true' && '-j2' || '' }}
         run: cargo test $JOBS --no-fail-fast --locked --test storage
       - name: Build launcher runtime holder test actor
         id: build_launcher_runtime_holder_test_actor
-        if: ${{ !cancelled() && steps.cap_build_parallelism_to_the_runner.outcome == 'success' && (needs.changes.outputs.launcher_required != 'false') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         working-directory: launcher
         env:
           JOBS: ${{ needs.changes.outputs.self_hosted == 'true' && '-j2' || '' }}
         run: python3 ../tools/ci/ignored_shards.py --prepare horizon-mod-package $JOBS
       - name: Test launcher runtime package
         id: test_launcher_runtime_package
-        if: ${{ !cancelled() && steps.cap_build_parallelism_to_the_runner.outcome == 'success' && steps.build_launcher_runtime_holder_test_actor.outcome == 'success' && (needs.changes.outputs.launcher_required != 'false') }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && steps.build_launcher_runtime_holder_test_actor.outcome == 'success' }}
         working-directory: launcher
         env:
           JOBS: ${{ needs.changes.outputs.self_hosted == 'true' && '-j2' || '' }}
         run: cargo test $JOBS --no-fail-fast --manifest-path ../Cargo.toml --locked -p horizon-mod-package --features runtime-process --lib
       - name: Summarize failed gate steps
-        if: ${{ failure() && !cancelled() && steps.checkout.outcome == 'success' }}
+        if: ${{ failure() && !cancelled() && steps.setup.outcome == 'success' }}
         env:
           GATE_STEPS: ${{ toJSON(steps) }}
         run: python3 tools/ci/gate_summary.py

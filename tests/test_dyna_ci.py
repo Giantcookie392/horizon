@@ -371,7 +371,7 @@ class DynaRoutingTests(unittest.TestCase):
         fields = dict(line.strip().split(":", 1) for line in step.splitlines()
                       if line.startswith("        ") and ":" in line and not line.lstrip().startswith("#"))
         self.assertEqual(fields.get("run", "").strip(), command)
-        self.assertIn("steps.build_the_source_stage_generator_test_profile.outcome == 'success'", fields.get("if", ""))
+        self.assertIn("steps.stage.outcome == 'success'", fields.get("if", ""))
         self.assertEqual(fields.get("continue-on-error", "false").strip(), "false")
         self.assertEqual(verify.count(command), 1)
         self.assertLess(verify.index(name), verify.index("- name: Test Rust documentation examples"))
@@ -400,7 +400,7 @@ class DynaRoutingTests(unittest.TestCase):
                 key, value = line.strip().split(":", 1)
                 fields[key] = value.strip()
         self.assertEqual(fields.get("run"), "python3 tools/ci/surface_report.py")
-        self.assertIn("steps.build_the_source_stage_generator_test_profile.outcome == 'success'", fields.get("if", ""))
+        self.assertIn("steps.stage.outcome == 'success'", fields.get("if", ""))
         self.assertIn("github.event_name == 'pull_request' || inputs.pr != ''", fields.get("if", ""))
         self.assertEqual(fields.get("EVENT"), "${{ github.event_name }}")
         self.assertEqual(fields.get("PR"), "${{ inputs.pr }}")
@@ -444,7 +444,7 @@ class DynaRoutingTests(unittest.TestCase):
         condition = step.split("if:", 1)[1].split("\n", 1)[0]
         self.assertNotIn("success()", condition)
         self.assertIn("!cancelled()", condition)
-        self.assertIn("steps.install_rust_tools_for_isolated_tooling_fixtures.outcome == 'success'", condition)
+        self.assertIn("steps.setup.outcome == 'success'", condition)
         self.assertNotIn("always()", condition)
 
     @unittest.skipUnless(POSIX_BASH, "needs a bash that is not WSL's")
