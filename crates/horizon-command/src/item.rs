@@ -34,6 +34,7 @@ pub const DECODED_COMPONENTS: &[&str] = &[
     "minecraft:item_name",
     "minecraft:block_entity_data",
     "minecraft:dyed_color",
+    "minecraft:custom_model_data",
 ];
 
 /// Validate and decode a component into the value representation shared with stacks.
@@ -62,6 +63,8 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
         "minecraft:dyed_color" => {
             Tag::Int(horizon_core::color::rgb_color_from_tag(value).expect("validated RGB color"))
         }
+        "minecraft:custom_model_data" => horizon_items::item_data::custom_model_data::decode(value)
+            .expect("validated custom model data"),
         "minecraft:enchantments" | "minecraft:stored_enchantments" => {
             let Tag::Compound(entries) = value else {
                 unreachable!("validated enchantment map")
@@ -87,6 +90,12 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
 /// The codecs of the item components commands commonly set.
 pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), String> {
     match id {
+        "minecraft:custom_model_data" => horizon_items::item_data::custom_model_data::valid(t)
+            .then_some(())
+            .ok_or_else(|| {
+                "Expected custom model data record with floats, flags, strings and colors lists"
+                    .into()
+            }),
         "minecraft:dyed_color" => horizon_core::color::rgb_color_from_tag(t)
             .map(|_| ())
             .ok_or_else(|| "Expected a number or a list of three numeric RGB channels".into()),

@@ -54,11 +54,17 @@ Native registrations retain their persistent NBT validation contract.
 
 The shared decoder currently covers `damage`, `repair_cost`, `max_damage`,
 `max_stack_size`, `rarity`, `enchantments`, `stored_enchantments`, `custom_name`,
-`item_name`, `block_entity_data`, and `dyed_color` in the `minecraft` namespace.
+`item_name`, `block_entity_data`, `dyed_color`, and `custom_model_data` in the `minecraft` namespace.
 `dyed_color` accepts a number (preserving every signed integer bit) or three numeric
 RGB channels (floored after multiplying by 255, masked to bytes, with opaque alpha).
 It does not accept hex strings, four-channel lists or tooltip records.
-The other 111 registered built-ins use stored-value matching while their shared
+`custom_model_data` accepts a record of ordered `floats`, `flags`, `strings` and
+`colors` lists, each defaulting to empty. Unknown record fields are ignored.
+Numbers use Java float conversion, flags use numeric nonzero truth, strings retain
+their UTF-16 units, and colors use the same RGB codec as `dyed_color`.
+Float matching distinguishes signed zero and equates all NaNs. Comparisons borrow
+live lists, including primitive NBT arrays, without allocating or serializing.
+The other 110 registered built-ins use stored-value matching while their shared
 decoders are added incrementally in **#3875**. Their absence is not a load refusal.
 
 Component ingredient displays contain the patch, including removals. Difference
