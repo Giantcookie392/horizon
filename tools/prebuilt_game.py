@@ -50,6 +50,10 @@ EXECUTABLE = "horizon-client.exe" if sys.platform == "win32" else "horizon-clien
 # The furthest a game started without its prepared files gets (game.rs `missing_resources`): past loading the
 # game's libraries and the mods' runtime environment (`entry::main_with`), where a split allocator aborts (#3877).
 NO_RESOURCES = "Horizon's prepared game files are missing"
+# The MinGW runtime the game's GNU DLLs import on Windows, installed beside the executable.
+MINGW_RUNTIME = ("libgcc_s_seh-1.dll", "libwinpthread-1.dll")
+# Windows' STATUS_DLL_NOT_FOUND, the exit status of a process whose imports could not all be loaded.
+DLL_NOT_FOUND = 0xC0000135
 # The launcher's generated `main.rs` comes from the game it links against.
 TEMPLATE = "native_main.rs.template"
 # The API route's mods library (`horizon_native_mods`): the SDK builds it from this template with no rows as the stub
@@ -646,7 +650,7 @@ def runtime_libraries(deps: Path) -> list[Path]:
         gcc = shutil.which("gcc")
         if gcc is None:
             sys.exit("smoke: no gcc on PATH, so no MinGW runtime to install beside the executable")
-        libraries += [Path(gcc).parent / name for name in ("libgcc_s_seh-1.dll", "libwinpthread-1.dll")]
+        libraries += [Path(gcc).parent / name for name in MINGW_RUNTIME]
     return libraries
 
 
@@ -654,7 +658,8 @@ def start(out: Path) -> None:
     """Start both executables `smoke` installed (the engine route's with the starter mod, the API route's with its stub),
     each as a dedicated server with no game data: it loads the game's libraries
     and sets up the mods' runtime, then stops at the missing prepared files. Fails on a crash, a hang or any other
-    stop, so an archive whose libraries disagree (two allocators, #3877) cannot ship."""
+    stop, so an archive whose libraries disagree (two allocators, #3877) cannot ship. On Windows it runs without
+    MinGW on PATH, as on a player's computer, so a runtime DLL the launcher would not install fails here (#3521)."""
     # Run as a script, so lab sits on the path beside it; tests import this module without running `start`.
     import lab
 
@@ -668,6 +673,12 @@ def start(out: Path) -> None:
                 home.mkdir()
             environment = lab.game_env(RUST_BACKTRACE="1")
             environment.update({key: str(home) for key, home in homes.items()})
+            if sys.platform == "win32":
+                # A player has no MinGW: Windows must find every DLL beside the executable or in the system, so a
+                # folder of PATH that holds the MinGW runtime (the runner's MinGW, Git's, a toolchain's) is left out.
+                environment["PATH"] = os.pathsep.join(
+                    folder for folder in environment.get("PATH", "").split(os.pathsep)
+                    if folder and not any((Path(folder) / name).is_file() for name in MINGW_RUNTIME))
             game = scratch / "game"
             game.mkdir()
             # A dedicated server stops at an unaccepted EULA before it reaches the prepared files (the EULA is accepted).
@@ -698,6 +709,9 @@ def start(out: Path) -> None:
                                     stderr=subprocess.STDOUT, encoding="utf-8", errors="replace", timeout=300)
         print(result.stdout, end="")
         print(f"start: exit {result.returncode}")
+        if result.returncode == DLL_NOT_FOUND:
+            sys.exit("start: Windows found no copy of a DLL the executable or one of its libraries imports "
+                     f"(0xC0000135): it is neither beside the executable in {installed} nor a system DLL")
         # The prepared-files check exits with status 1; any other status is a different stop.
         if result.returncode != 1 or NO_RESOURCES not in result.stdout or "panicked" in result.stdout:
             sys.exit(f"start: {installed.name} stopped before the prepared-files check (exit {result.returncode})")
