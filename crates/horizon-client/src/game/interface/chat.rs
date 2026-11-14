@@ -1009,7 +1009,7 @@ impl Game<'_> {
         // InBedChatScreen.onClose: leaving the screen means getting up; the
         // screen goes once the player has woken (`tick_in_bed_chat`).
         if self.ui.in_bed_chat && self.sleeping.is_some() {
-            self.wake_up();
+            self.wake_up(false, true);
             return;
         }
         let text = self
@@ -1426,7 +1426,7 @@ impl Game<'_> {
                 .built_chat(width, height)
                 .map_or_else(|| Self::leave_bed_button(width, height), |l| l.leave_bed);
             if horizon_client::screen_draw::inside((cursor.0 as i32, cursor.1 as i32), x, y, w, h) {
-                self.wake_up();
+                self.wake_up(false, true);
                 return;
             }
         }

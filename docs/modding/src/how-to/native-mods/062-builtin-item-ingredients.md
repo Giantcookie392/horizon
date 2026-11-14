@@ -77,8 +77,13 @@ zero (including negative zero) is false; nonzero values, fractions and NaN are
 true. Displays retain canonical byte 0 or 1.
 `dyed_color` accepts packed integer colors or three numeric RGB channels,
 matching the decoded values without copying candidate payloads.
-The other 96 registered built-ins use stored-value matching while their shared
+The other 95 registered built-ins use stored-value matching while their shared
 decoders are added incrementally in **#3875**. Their absence is not a load refusal.
+
+`dye` accepts exactly the 16 lowercase vanilla color names (including `light_blue`
+and `light_gray`). Unknown names, differently cased names and non-string values
+reject the recipe. Numeric dye ordinals belong to compressed dynamic operations,
+not ordinary persistent NBT; compressing an NBT file does not change this rule.
 
 Component ingredient displays contain the patch, including removals. Difference
 lists retain the base list and remove only items whose default stack passes the

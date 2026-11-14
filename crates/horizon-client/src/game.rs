@@ -998,7 +998,7 @@ struct Game<'a> {
     damage_tag_generation: u64,
     /// The registries native mods registered data map types for, as of the
     /// server tables' last build: what `data_maps_updated` fires for.
-    data_map_registries: Vec<&'static str>,
+    data_map_registries: Vec<String>,
     /// This game's resource packs (`reload_packs` replaces them).
     pack: PackResources,
     /// The title and menu bundle (GUI atlas, font and panorama).
@@ -7847,33 +7847,31 @@ impl Game<'_> {
         self.occupy_bed(head);
         true
     }
-    fn wake_up(&mut self) {
+    /// `Player.stopSleepInBed`: preserve the flags of the owning wake caller.
+    fn wake_up(&mut self, wake_immediately: bool, update_level: bool) {
         if self.remote.is_some() {
             // InBedChatScreen.sendWakeUp: the server wakes the player.
             self.remote_stop_sleeping();
             return;
         }
+        // PlayerWakeUpEvent: heard at the start of stopSleepInBed, still in bed;
+        // a listener may have woken the player, so the sleep is read after it.
+        self.native_acting_bed_leave(wake_immediately, update_level);
         let Some(head) = self.sleeping.take() else {
             return;
         };
-        self.sleep_timer = 100;
+        self.sleep_timer = if wake_immediately { 0 } else { 100 };
         // The active guest's live body wakes here; the hub owns its wake
         // animation and sleeping metadata, not the suspended outer actor.
         if let Some(i) = self.lan_acting.and_then(|conn| self.guest_index(conn))
             && let Some(host) = self.lan.as_mut()
         {
             // The live turn may have changed its bed since entry.
-            {
-                let value = Some(head);
-                host.hub.guests.update(i, |guest| guest.bed = value);
-            }
-            host.hub.wake(i);
+            host.hub.guests.update(i, |guest| guest.bed = Some(head));
+            host.hub.wake(i, wake_immediately);
             // This live body applies the stand-up pose below, not the later
             // wake_woken_guests pass over stored guest bodies.
-            {
-                let value = None;
-                host.hub.guests.update(i, |guest| guest.woke_from = value);
-            }
+            host.hub.guests.update(i, |guest| guest.woke_from = None);
         }
         let stand = self.bed_wake_pose(head, self.yaw);
         if let Some(p) = self.player.as_mut() {
@@ -7895,9 +7893,6 @@ impl Game<'_> {
                 self.snap_player_model_pitch();
             }
         }
-        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
-            self.native_player_bed_leave(player, &name, head);
-        }
     }
     fn tick_sleep(&mut self) {
         self.sleep_timer = tick_sleep_timer(self.sleep_timer, self.sleeping.is_some());
@@ -7908,14 +7903,13 @@ impl Game<'_> {
             let bed_gone = !self.res.facts().get(bed).name.ends_with("_bed");
             // Vanilla has no Shift wake-up: the chat screen's capitals must
             // not get the sleeper up.
-            if (self.screen != Screen::Chat && self.keys.held(Mapping::Sneak))
-                || bed_gone
+            let wake_immediately = bed_gone
                 || self
                     .player
                     .as_ref()
-                    .is_none_or(|p| p.health.dead_or_dying())
-            {
-                self.wake_up();
+                    .is_none_or(|p| p.health.dead_or_dying());
+            if wake_immediately || (self.screen != Screen::Chat && self.keys.held(Mapping::Sneak)) {
+                self.wake_up(wake_immediately, true);
                 return;
             }
             // setPosToBed: the bed's top (`getSleepHeight`) and 0.125 above
@@ -7971,7 +7965,7 @@ impl Game<'_> {
                 self.world.weather.thunder_time = 0;
             }
             if self.sleeping.is_some() {
-                self.wake_up();
+                self.wake_up(false, false);
             }
             self.wake_guests();
             // SleepStatus.removeAllSleepers: waking everyone is not announced.
