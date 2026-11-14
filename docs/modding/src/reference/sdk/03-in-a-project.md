@@ -12,8 +12,8 @@ SDK carries no `horizon-internals` crate yet: a mod that names game internals bu
 puts the mod's own generated facade in its place, and not with a plain `cargo check`. Features
 (`features = ["testing"]` on a dev-dependency) are kept.
 
-That path is the only form the launcher and the tool take. Every other form is refused under `E_SDK_SOURCE`, with
-the line to write instead:
+`cargo horizon-mod new` writes that path, and it is the only form the launcher takes: when it builds a mod, it
+refuses every other form under `E_SDK_SOURCE`, with the line to write instead:
 
 | Written | Why it is refused |
 |---|---|
@@ -49,8 +49,7 @@ into `.horizon/sdk/` when the folder is missing or holds another build, after th
 It holds `sdk.json`, `surface.json`, the unpacked API source under `api/`, and `build`, a file naming the build. That
 file is written last, so a fetch that stopped partway is fetched again by the next command.
 
-`fits` and `update` fetch nothing for a mod made for exactly one build: its manifest says so before any SDK is
-needed. Any of these commands makes a fresh clone of a mod work, `check` included, since it fetches before Cargo
+`fits` and `update` fetch no SDK for a mod made for exactly one build: its manifest says so before one is needed. Any of these commands makes a fresh clone of a mod work, `check` included, since it fetches before Cargo
 reads the path. An editor needs that first command too: until it runs, `horizon-mod-api`'s path does not exist.
 
 `sdk diff`, `fits` and `update` read other builds' small files (`sdk.json` and `surface.json`) into
@@ -61,11 +60,15 @@ launcher or sent to a registry.
 
 ## Mirrors and offline use
 
-`HORIZON_SDK_BASE` replaces the releases' base for the tool and the launcher alike:
+`HORIZON_SDK_BASE` replaces the releases' base for the SDK fetches of the tool and the launcher alike:
 
 - a URL: a mirror with the same layout, `<base>/sdk-<build id>/<file>`;
 - anything else: a folder holding `sdk-<build id>/` folders, and `nightly/` or `nightly-<date>/` folders with their
   `sdk.json` for Nightly names. The launcher also reads game releases' folders there, for their build ids.
 
-Every base is checked the same way, against Horizon's signature. The launcher's own copies are described in
+Every SDK base is checked the same way, against Horizon's signature. The launcher's own copies are described in
 [Cache and disk](../../how-to/native-mods/10-cache-and-disk.md).
+
+The internals commands (`update` on a mod with an `internals` list or `[[inject]]` rows, `inject add` and
+`inject update`) still read the older prebuilt release; moving them onto the SDK is tracked in
+[#4194](https://github.com/arismoko/horizon/issues/4194).

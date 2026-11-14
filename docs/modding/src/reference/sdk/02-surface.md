@@ -60,8 +60,13 @@ Each change says what changed in words a mod author can act on, for example
 same report for two published builds.
 
 When the `verify` check runs on a pull request that changes Rust, its summary carries this report, comparing the
-merge base with the head. It reports and never fails the check, except for a change note that cannot be read or
-names an item that did not change.
+merge base with the head. It reports, and fails the check only when:
+
+- the head's tree cannot be exported;
+- a change note cannot be read, or names an item that did not change;
+- with the gate on (`gate = true` in `tools/ci/surface.toml`), a breaking change has no change note.
+
+The gate is off today.
 
 ## Change notes
 

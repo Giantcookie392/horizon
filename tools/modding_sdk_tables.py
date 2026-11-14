@@ -10,7 +10,8 @@
   this checkout's own export (`horizon-stage surface`).
 
 The words beside each kind, target, route and record prefix are here; a name that has none fails the build, and so
-do words for an asset kind, target or route that is gone, so the tables never drift from what is published.
+do words for one that is gone, so the tables never drift from what is published. A marker no chapter holds fails the
+build too, so a table cannot drop out of the book unnoticed.
 """
 import json
 from pathlib import Path
@@ -167,10 +168,8 @@ def surface(document):
         prefix, _, rest = record.partition(":")
         key = f"{prefix} member" if prefix in ("hook", "type") and "." in rest else prefix
         counts[key] = counts.get(key, 0) + 1
-    unknown = sorted(set(counts) - set(RECORDS))
-    if unknown:
-        raise ValueError(f"surface record kinds: no words for {unknown}")
-    rows = [[RECORDS[key], f"`{ID_FORMS[key]}`", str(counts.get(key, 0))] for key in RECORDS]
+    exactly(RECORDS, counts, "surface record kinds")
+    rows = [[RECORDS[key], f"`{ID_FORMS[key]}`", str(counts[key])] for key in RECORDS]
     return (f"Schema {document['schema']}. The counts are of the commit this book was built from.\n\n"
             + table(["Record", "Id", "Count"], rows))
 
@@ -202,8 +201,13 @@ def preprocess(context, book):
         "{{#sdk-routes}}": lambda: routes(json.loads((root / INPUTS.relative_to(ROOT)).read_text())),
         "{{#sdk-surface}}": lambda: surface(export_surface(root)),
     }
+    holding = [chapter for chapter in chapters(book["sections"])
+               if any(marker in chapter["content"] for marker in render)]
+    lost = sorted(marker for marker in render if not any(marker in chapter["content"] for chapter in holding))
+    if lost:
+        raise ValueError(f"SDK table markers no chapter holds: {lost}")
     done = {}
-    for chapter in chapters(book["sections"]):
+    for chapter in holding:
         for marker, make in render.items():
             if marker in chapter["content"]:
                 if marker not in done:
