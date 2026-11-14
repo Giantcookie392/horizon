@@ -34,6 +34,7 @@ pub const DECODED_COMPONENTS: &[&str] = &[
     "minecraft:custom_name",
     "minecraft:item_name",
     "minecraft:block_entity_data",
+    "minecraft:compostable",
 ];
 
 /// Validate and decode a component into the value representation shared with stacks.
@@ -42,6 +43,9 @@ pub const DECODED_COMPONENTS: &[&str] = &[
 pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Result<Tag, String> {
     if !DECODED_COMPONENTS.contains(&id) {
         return Ok(value.clone());
+    }
+    if id == "minecraft:compostable" {
+        return horizon_items::item_data::ingredient_components::decoded_compostable(value);
     }
     decode_component(id, value, reg)?;
     if id == "minecraft:block_entity_data" {
@@ -124,6 +128,9 @@ pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), Strin
         "minecraft:enchantment_glint_override" => horizon_items::item_data::component_bool(t)
             .map(|_| ())
             .ok_or_else(|| "Not a number".into()),
+        "minecraft:compostable" => {
+            horizon_items::item_data::ingredient_components::validate_compostable(t)
+        }
         "minecraft:custom_name" | "minecraft:item_name" => super::component::decode(t),
         // TypedEntityData.codec: the type is the compound's id.
         "minecraft:block_entity_data" => match t {

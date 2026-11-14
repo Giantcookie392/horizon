@@ -54,14 +54,23 @@ Native registrations retain their persistent NBT validation contract.
 
 The shared decoder currently covers `damage`, `repair_cost`, `max_damage`,
 `max_stack_size`, `rarity`, `enchantments`, `stored_enchantments`, `custom_name`,
-`enchantment_glint_override`, `item_name`, and `block_entity_data` in the
-`minecraft` namespace. The other 111 registered built-ins use stored-value matching
+`enchantment_glint_override`, `item_name`, `block_entity_data`, and `compostable` in the
+`minecraft` namespace. The other 110 registered built-ins use stored-value matching
 while their shared decoders are added incrementally in **#3875**. Their absence is
 not a load refusal.
 
 `enchantment_glint_override` accepts booleans and all numeric NBT widths, as
 `Codec.BOOL` with `NbtOps` does: zero (including negative zero) is false;
 nonzero values, fractions and NaN are true. Displays retain canonical byte 0 or 1.
+
+`compostable` follows the pinned 26.3 schema: a required `layers` field, either
+an integer or a resource-location string naming a context integer provider.
+Numeric NBT widths use Java integer conversion (fractions truncate, longs wrap,
+NaN becomes zero and infinities saturate). Keys default to the `minecraft`
+namespace and do not require the provider to exist during decoding. Unknown
+record fields are ignored. There is no `chance` or villager-flag default in this
+schema; omitting `layers` rejects the whole recipe. This decoder does not change
+composter gameplay.
 
 Component ingredient displays contain the patch, including removals. Difference
 lists retain the base list and remove only items whose default stack passes the

@@ -56,6 +56,17 @@ pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
             a.data().and_then(|d| d.other(id)).and_then(component_bool)
                 == b.data().and_then(|d| d.other(id)).and_then(component_bool)
         }
+        "minecraft:compostable" => {
+            let a = a
+                .data()
+                .and_then(|d| d.other(id))
+                .and_then(|tag| compostable_layers(tag).ok());
+            let b = b
+                .data()
+                .and_then(|d| d.other(id))
+                .and_then(|tag| compostable_layers(tag).ok());
+            matches!((a, b), (Some(a), Some(b)) if a == b)
+        }
         "minecraft:custom_name" => {
             a.data().and_then(|d| d.custom_name.as_ref())
                 == b.data().and_then(|d| d.custom_name.as_ref())
@@ -76,6 +87,28 @@ pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
         "minecraft:rarity" => rarity(a) == rarity(b),
         _ => stored_component_equal(id, a, b),
     }
+}
+
+/// `Compostable.CODEC` / `ResolvableInt.CODEC`: required layers, either any Java
+/// int or a resource key. References are keys, not registry lookups.
+fn compostable_layers(value: &Tag) -> Result<crate::properties::resolvable::Int<'_>, &'static str> {
+    if !matches!(value, Tag::Compound(_)) {
+        return Err("Not a map");
+    }
+    let layers = value.get("layers").ok_or("Missing layers")?;
+    crate::properties::resolvable::int(layers)
+        .ok_or("layers: expected a number or resource location")
+}
+
+/// Validate without materializing a normalized payload.
+pub fn validate_compostable(value: &Tag) -> Result<(), String> {
+    compostable_layers(value).map(|_| ()).map_err(str::to_owned)
+}
+
+/// Normalize only the persistent codec fields; unknown record fields are ignored.
+pub fn decoded_compostable(value: &Tag) -> Result<Tag, String> {
+    let layers = compostable_layers(value).map_err(str::to_owned)?.to_tag();
+    Ok(Tag::compound([("layers", layers)]))
 }
 
 /// Exact stored-value comparison, including the fields removed from `other` by decoding.
