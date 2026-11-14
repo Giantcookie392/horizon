@@ -25,7 +25,6 @@ fn int_of(t: &Tag) -> Option<i64> {
 /// Built-ins with an implemented shared component payload decoder.
 pub const DECODED_COMPONENTS: &[&str] = &[
     "minecraft:dye",
-    "minecraft:block_state",
     "minecraft:use_cooldown",
     "minecraft:cooking_fuel",
     "minecraft:brewing_fuel",
@@ -168,7 +167,6 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
 /// The codecs of the item components commands commonly set.
 pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), String> {
     match id {
-        "minecraft:block_state" => block_state(t),
         "minecraft:use_cooldown" => use_cooldown(t).map(|_| ()),
         "minecraft:cooking_fuel" => horizon_items::item_data::cooking_fuel::decode(t).map(|_| ()),
         "minecraft:brewing_fuel" => horizon_items::item_data::brewing_fuel::decode(t).map(|_| ()),
@@ -337,18 +335,6 @@ fn use_cooldown(value: &Tag) -> Result<Tag, String> {
         record.insert("cooldown_group".into(), item_model(group)?);
     }
     Ok(Tag::Compound(record))
-}
-fn block_state(value: &Tag) -> Result<(), String> {
-    let Tag::Compound(properties) = value else {
-        return Err(not_map(value));
-    };
-    if properties
-        .values()
-        .any(|value| !matches!(value, Tag::String(_)))
-    {
-        return Err("Not a string".into());
-    }
-    Ok(())
 }
 fn enchantment_map(t: &Tag, reg: &Registries) -> Result<(), String> {
     let Tag::Compound(map) = t else {
