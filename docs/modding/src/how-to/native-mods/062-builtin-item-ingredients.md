@@ -54,10 +54,12 @@ Native registrations retain their persistent NBT validation contract.
 
 The shared decoder currently covers `damage`, `repair_cost`, `max_damage`,
 `max_stack_size`, `rarity`, `enchantments`, `stored_enchantments`, `custom_name`,
-`item_name`, `item_model`, and `block_entity_data` in the `minecraft` namespace.
+`item_name`, `item_model`, `use_cooldown`, and `block_entity_data` in the `minecraft` namespace.
 `item_model` accepts valid resource identifiers without requiring an existing model;
-bare names and an empty namespace normalize to `minecraft`. The other 111 registered
-built-ins use stored-value matching while their shared decoders are added
+bare names and an empty namespace normalize to `minecraft`. `use_cooldown` requires
+positive finite float `seconds` (no default), accepts an optional `cooldown_group`
+identifier with the same normalization, and ignores unknown record fields.
+The other 110 registered built-ins use stored-value matching while their shared decoders are added
 incrementally in **#3875**. Their absence is not a load refusal.
 
 Component ingredient displays contain the patch, including removals. Difference
