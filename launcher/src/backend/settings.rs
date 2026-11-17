@@ -1,7 +1,8 @@
 //! The launcher's settings (`settings.json`): what the Settings page and `horizon-launcher settings` change.
 use super::*;
 
-/// The launcher's appearance, as the player picks it in Settings.
+/// The launcher's appearance, as older launchers saved it: a theme is one look now, and a saved
+/// `light` opens on the Taiga theme (`Settings::parse`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Appearance {
@@ -95,13 +96,24 @@ pub struct Settings {
     /// Unset means none: the environment's `HTTPS_PROXY` and `HTTP_PROXY` apply instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy: Option<String>,
-    /// Dark, Light, or the system's: the launcher's look. Dark by default.
+    /// Only read to move an old light appearance to the Taiga theme (`parse`): always dark now,
+    /// a theme being one look.
     #[serde(default)]
     pub appearance: Appearance,
     /// The player has read what the "I'm playing" ping holds (`telemetry::PING`): on the
     /// first-run question, or on the Play page once if they answered that before it existed.
     #[serde(default)]
     pub ping_notice_seen: bool,
+    /// The player turned the anonymous "I'm playing" ping off (`telemetry::PING`): the game is
+    /// started with `HORIZON_NO_HEARTBEAT`. On by default, as upstream sends it.
+    #[serde(default)]
+    pub ping_off: bool,
+    /// The look's flourishes, each on or off (`effects`): glow, gradients, the hover shine.
+    #[serde(default)]
+    pub effects: crate::effects::Effects,
+    /// The player has been through the first-run welcome (theme, accent, effects).
+    #[serde(default)]
+    pub welcomed: bool,
     /// The player without an account that owns the game has read, once, why the launcher needs
     /// one now (the owner gate's screen).
     #[serde(default)]
@@ -146,24 +158,35 @@ pub struct Settings {
     /// and before Play (`browser::horizon::auto`). Unset is on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mods_auto_update: Option<bool>,
-    /// The player has read the notice before the first native mod (`native_status::NOTICE`).
-    /// Native mods are always on: an older file's `native_mods` switch is ignored.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub native_mods_noticed: bool,
-    /// The profile native builds compile with (`native_mods::Profile::chosen`); none is the
-    /// default, or the release's own while `native_release` is on.
+    /// First-use native code permission for this launcher install, Unix seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_profile: Option<crate::native_mods::Profile>,
-    /// Combined fast/release compilation cache limit in GiB. Unset is 30; zero disables
-    /// automatic cleanup. Installed native versions and player data are not this cache.
+    pub native_mods_allowed_at: Option<u64>,
+    /// Managed cache limit in GiB (unset: 25; zero: no automatic cleanup). Player data isn't cache.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_cache_gib: Option<u64>,
-    /// An older file's switch for the release profile, read when `native_profile` is unset.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub native_release: bool,
+    pub cache_limit_gib: Option<u64>,
+    /// The accent picked under each launcher theme, by its id (`themes::HORIZON` for Horizon's
+    /// own), so going back to a theme brings back its colour. A launcher older than this map
+    /// drops it when it saves: the themes then only start from their own accents again.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub theme_accents: std::collections::BTreeMap<String, crate::themes::Accent>,
+    /// Reduced motion: unset follows the system's, true keeps the launcher still, false lets it
+    /// move even when the system asks for less.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reduce_motion: Option<bool>,
 }
 
 impl Settings {
+    /// Remember an explicit approval; merely finding an installed toolchain never grants it.
+    pub fn allow_native_mods(&mut self) -> Result<(), String> {
+        self.native_mods_allowed_at = Some(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|error| error.to_string())?
+                .as_secs(),
+        );
+        self.save()
+    }
+
     pub fn load() -> Self {
         Self::parse(&fs::read_to_string(data_dir().join("settings.json")).unwrap_or_default())
     }
@@ -202,6 +225,7 @@ impl Settings {
                     fields.remove(key);
                 }
             }
+            look_settings::tidy(fields);
             // A language this launcher doesn't have yet follows the system's.
             if fields.get("language").is_some_and(|l| {
                 serde_json::from_value::<Option<crate::i18n::Language>>(l.clone()).is_err()
@@ -209,7 +233,9 @@ impl Settings {
                 fields.remove("language");
             }
         }
-        serde_json::from_value(value).unwrap_or_default()
+        let mut settings: Self = serde_json::from_value(value).unwrap_or_default();
+        look_settings::settle(&mut settings);
+        settings
     }
     /// Whether the launcher keeps its entry in the applications menu (Linux).
     pub fn desktop_entry(&self) -> bool {
