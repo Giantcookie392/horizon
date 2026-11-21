@@ -125,7 +125,7 @@ impl NativeSky {
     /// The pipeline of the pack's sky `stage` with the option values `constants`, drawing
     /// onto the world's target of `format`; `globals` is the terrain's group 0, and the frame
     /// with the kept resources the stage reads (`kept`) its group 3.
-    pub fn new(
+    pub(in crate::gfx) fn new(
         device: &wgpu::Device,
         globals: &wgpu::BindGroupLayout,
         (frame, kept): (&NativeFrame, Option<StageReads>),
@@ -140,7 +140,8 @@ impl NativeSky {
         }
         let (module, layout) = build(device, globals, (frame, kept.as_ref()), stage)?;
         let present = present_constants(&module, constants);
-        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some(&super::dx12_compiler::module_label(&stage.label)),
             source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(module)),
@@ -153,7 +154,8 @@ impl NativeSky {
             &present,
             format,
         );
-        if let Some(e) = pollster::block_on(scope.pop()) {
+        let internal = pollster::block_on(internal.pop());
+        if let Some(e) = internal.or(pollster::block_on(validation.pop())) {
             return Err(format!("{}: {e}", stage.file));
         }
         Ok(Self {

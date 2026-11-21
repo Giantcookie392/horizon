@@ -8,12 +8,14 @@ import struct
 import subprocess
 import tarfile
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 from pathlib import Path
 
 from tools import prebuilt_game
 from tests.test_ci_concurrency import yaml
+from tests.symlinks import symlink_or_skip
 
 COMMIT = "c" * 40
 
@@ -67,14 +69,15 @@ class StageToolTests(unittest.TestCase):
                 if command[0] == "git":
                     return real_run(command, **kwargs)
                 calls.append(command)
-                self.assertEqual(command, [str(tool.resolve()), str(target / "stage"),
-                                          str(target / "stage/points.json"),
-                                          str(target / "stage/internals.json"), commit])
-                self.assertEqual(kwargs["cwd"], target / "stage")
+                fresh = target / "stage.next"
+                self.assertEqual(command, [str(tool.resolve()), str(fresh),
+                                          str(fresh / "points.json"),
+                                          str(fresh / "internals.json"), commit])
+                self.assertEqual(kwargs["cwd"], fresh)
                 self.assertIsNone(kwargs["env"])
-                self.assertEqual((target / "stage/tracked.rs").read_bytes(), committed)
-                self.assertFalse((target / "stage/untracked.rs").exists())
-                (target / "stage/tracked.rs").write_text("staged")
+                self.assertEqual((fresh / "tracked.rs").read_bytes(), committed)
+                self.assertFalse((fresh / "untracked.rs").exists())
+                (fresh / "tracked.rs").write_text("staged")
                 return "staged fixture\n"
 
             with patch.object(prebuilt_game, "ROOT", source), \
@@ -84,6 +87,93 @@ class StageToolTests(unittest.TestCase):
                 prebuilt_game.stage(target, stage_tool=tool)
             self.assertEqual(len(calls), 2)
             self.assertTrue((source / "tracked.rs").read_bytes().endswith(b"fn edited() {}\r\n"))
+            self.assertEqual((target / "stage" / "tracked.rs").read_text(), "staged")
+            self.assertFalse((target / "stage.next").exists())
+
+
+class SyncUnchangedTests(unittest.TestCase):
+    def test_source_paths_can_change_between_files_and_directories(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, dest = root / "source", root / "dest"
+            (source / "file_to_dir").mkdir(parents=True)
+            (source / "file_to_dir" / "new.rs").write_bytes(b"new nested file")
+            (source / "dir_to_file").write_bytes(b"new flat file")
+            (dest / "dir_to_file").mkdir(parents=True)
+            (dest / "dir_to_file" / "old.rs").write_bytes(b"old nested file")
+            (dest / "file_to_dir").write_bytes(b"old flat file")
+
+            self.assertEqual(prebuilt_game.sync_unchanged(source, dest), (2, 2, 0))
+            self.assertEqual((dest / "file_to_dir" / "new.rs").read_bytes(), b"new nested file")
+            self.assertEqual((dest / "dir_to_file").read_bytes(), b"new flat file")
+
+    def test_an_unchanged_file_keeps_its_mtime_and_a_changed_one_is_written(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, dest = root / "source", root / "dest"
+            (source / "keep").mkdir(parents=True)
+            (source / "keep" / "same.txt").write_bytes(b"same")
+            (source / "new.txt").write_bytes(b"new")
+            (dest / "target").mkdir(parents=True)
+            (dest / "target" / "stale.o").write_bytes(b"object")
+            (dest / "keep").mkdir()
+            same = dest / "keep" / "same.txt"
+            same.write_bytes(b"same")
+            (dest / "gone.txt").write_bytes(b"gone")
+            (dest / "old" / "deep").mkdir(parents=True)
+            (dest / "old" / "deep" / "gone.rs").write_bytes(b"gone")
+            stamp = time.time() - 120
+            os.utime(same, (stamp, stamp))
+            before = same.stat().st_mtime_ns
+            written, removed, unchanged = prebuilt_game.sync_unchanged(source, dest)
+            self.assertEqual((written, removed, unchanged), (1, 2, 1))
+            self.assertEqual(same.stat().st_mtime_ns, before)
+            self.assertEqual(same.read_bytes(), b"same")
+            self.assertEqual((dest / "new.txt").read_bytes(), b"new")
+            self.assertFalse((dest / "gone.txt").exists())
+            self.assertFalse((dest / "old").exists())
+            self.assertEqual((dest / "target" / "stale.o").read_bytes(), b"object")
+
+    # A timing comparison, so it is a measurement rather than a check: a busy runner can reorder it.
+    @unittest.skipUnless(os.environ.get("HORIZON_MEASURE_STAGE") == "1", "set HORIZON_MEASURE_STAGE=1 to measure")
+    def test_measure_syncing_unchanged_files_against_rewriting_them(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, dest = root / "source", root / "dest"
+            count = 1500
+            for i in range(count):
+                path = source / "crates" / f"c{i // 50}" / f"f{i}.rs"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"fn item() {}\n" * 8)
+            prebuilt_game.sync_unchanged(source, dest)
+
+            def rewrite():
+                started = time.perf_counter_ns()
+                for path in source.rglob("*.rs"):
+                    target = dest / path.relative_to(source)
+                    target.write_bytes(path.read_bytes())
+                return time.perf_counter_ns() - started
+
+            def sync():
+                started = time.perf_counter_ns()
+                prebuilt_game.sync_unchanged(source, dest)
+                return time.perf_counter_ns() - started
+
+            runs = 7
+            for _ in range(2):
+                rewrite()
+                sync()
+            copied = sorted(rewrite() for _ in range(runs))
+            synced = sorted(sync() for _ in range(runs))
+            med = lambda samples: samples[len(samples) // 2]
+            p95 = lambda samples: samples[max(0, int(len(samples) * 0.95) - 1)]
+            report = (
+                f"scene files={count} bytes=each about 100 runs={runs}\n"
+                f"rewrite_ns median={med(copied)} p95={p95(copied)} worst={copied[-1]}\n"
+                f"sync_ns median={med(synced)} p95={p95(synced)} worst={synced[-1]}\n"
+            )
+            Path(os.environ.get("TEMP", "."), "hz-measure-stage.txt").write_text(report)
+            print(report)
 
 
 class RegistryPatchTests(unittest.TestCase):
@@ -115,7 +205,7 @@ class RegistryPatchTests(unittest.TestCase):
             (source / "Cargo.toml").write_text("[patch.crates-io]\nallocator-sys={path='patch'}\n")
             outside = root / "private.txt"
             outside.write_text("must not ship")
-            (patched / "leak").symlink_to(outside)
+            symlink_or_skip(patched / "leak", outside)
             with self.assertRaisesRegex(ValueError, "symlink"):
                 prebuilt_game.carry_patches(source, sdk)
             self.assertFalse((sdk / "patches").exists())
@@ -138,7 +228,7 @@ class RegistryPatchTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "aren't compiler outputs"):
                 prebuilt_game.check(sdk)
             extra.unlink()
-            extra.symlink_to(declared)
+            symlink_or_skip(extra, declared)
             with self.assertRaisesRegex(SystemExit, "symlinks"):
                 prebuilt_game.check(sdk)
             extra.unlink()
@@ -342,6 +432,31 @@ class SdkAssetTests(unittest.TestCase):
                 legs / "sdk-linux-client/engine-x86_64-unknown-linux-gnu.tar.xz", leg))
             refused("no build-data.tar.xz", lambda leg: (leg / "build-data.tar.xz").unlink())
 
+    def test_pack_exports_the_surface_with_the_tool_staging_built(self):
+        # Staging builds horizon-stage in <target>/prebuilt/tools: the surface export runs that binary, and builds one
+        # in the same place only when staging left none, never a second copy in <target>/release.
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "cargo-target"
+            tools = (target / "prebuilt" / "tools").resolve()
+            for platform, name in (("linux", "horizon-stage"), ("darwin", "horizon-stage"), ("win32", "horizon-stage.exe")):
+                with self.subTest(platform=platform), patch.object(sys, "platform", platform), \
+                        patch.dict(os.environ, {"CARGO_TARGET_DIR": str(target)}), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    # No staged tool: Cargo builds it in staging's target folder.
+                    command, env = prebuilt_game.surface_tool()
+                    self.assertEqual(command, ["cargo", "run", "--locked", "--release", "-q", "-p",
+                                               "horizon-mod-api-gen", "--bin", "horizon-stage", "--"])
+                    self.assertEqual(env["CARGO_TARGET_DIR"], str(tools))
+                    # Another platform's name is not this platform's tool.
+                    other = tools / "release" / ("horizon-stage" if name.endswith(".exe") else "horizon-stage.exe")
+                    other.parent.mkdir(parents=True, exist_ok=True)
+                    other.write_bytes(b"")
+                    self.assertEqual(prebuilt_game.surface_tool()[0][0], "cargo")
+                    tool = tools / "release" / name
+                    tool.write_bytes(b"")
+                    self.assertEqual(prebuilt_game.surface_tool(), ([str(tool)], None))
+                    shutil.rmtree(tools)
+
     def test_pack_refuses_another_commits_package(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -416,15 +531,23 @@ class AllocatorSelectionTests(unittest.TestCase):
             self.assertEqual(kwargs["env"]["HORIZON_GAME_BUILD_ID"], "fixture-commit")
             self.assertIn("-C prefer-dynamic", kwargs["env"]["RUSTFLAGS"])
             self.assertNotIn("CARGO_ENCODED_RUSTFLAGS", kwargs["env"])
+            commands.append(command)
             raise Captured
 
-        with patch.object(prebuilt_game, "stage", return_value=Path("staged")), \
-             patch.object(prebuilt_game, "head", return_value="fixture-commit"), \
-             patch.object(prebuilt_game, "rustc_host", return_value="fixture-host"), \
-             patch.object(prebuilt_game, "run", side_effect=capture), \
-             patch.dict(prebuilt_game.os.environ, {"CARGO_ENCODED_RUSTFLAGS": "-Cprefer-dynamic=no"}):
-            with self.assertRaises(Captured):
-                prebuilt_game.build(Path("unused-sdk"), False)
+        commands = []
+        # The timing report only when the workflow asks for one (dry runs): writing it can fail a build that compiled.
+        for timings in (None, "1"):
+            with patch.object(prebuilt_game, "stage", return_value=Path("staged")), \
+                 patch.object(prebuilt_game, "head", return_value="fixture-commit"), \
+                 patch.object(prebuilt_game, "rustc_host", return_value="fixture-host"), \
+                 patch.object(prebuilt_game, "run", side_effect=capture), \
+                 patch.dict(prebuilt_game.os.environ, {"CARGO_ENCODED_RUSTFLAGS": "-Cprefer-dynamic=no"}):
+                prebuilt_game.os.environ.pop("HORIZON_SDK_TIMINGS", None)
+                if timings:
+                    prebuilt_game.os.environ["HORIZON_SDK_TIMINGS"] = timings
+                with self.assertRaises(Captured):
+                    prebuilt_game.build(Path("unused-sdk"), False)
+        self.assertEqual(["--timings" in command for command in commands], [False, True])
 
 
 class ExecutableLinkPolicyTests(unittest.TestCase):

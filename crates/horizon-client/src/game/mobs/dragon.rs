@@ -1110,6 +1110,22 @@ fn wrap64(d: f64) -> f64 {
     }
     r
 }
+/// The `x`/`z` of node `i` in `findClosestNode`: the float angle widened to a
+/// double for `Mth.cos`/`Mth.sin`, whose table rounds differently from `cosf`.
+fn dragon_node_column(i: usize) -> (i32, i32) {
+    let (r, step, base) = if i < 12 {
+        (60.0f32, std::f32::consts::PI / 12.0, i)
+    } else if i < 20 {
+        (40.0, std::f32::consts::PI / 8.0, i - 12)
+    } else {
+        (20.0, std::f32::consts::PI / 4.0, i - 20)
+    };
+    let a = 2.0 * (-std::f32::consts::PI + step * base as f32);
+    (
+        (r * trig::cos(f64::from(a))).floor() as i32,
+        (r * trig::sin(f64::from(a))).floor() as i32,
+    )
+}
 impl Game<'_> {
     fn fight_path(&self) -> std::path::PathBuf {
         horizon_client::save::dimension_dir(&self.world_root, "minecraft:the_end").join(FIGHT_FILE)
@@ -2057,15 +2073,8 @@ impl Game<'_> {
         }
         let mut nodes = [[0; 3]; 24];
         for (i, node) in nodes.iter_mut().enumerate() {
-            let (r, step, base, add) = if i < 12 {
-                (60.0f32, std::f32::consts::PI / 12.0, i, 5)
-            } else if i < 20 {
-                (40.0, std::f32::consts::PI / 8.0, i - 12, 15)
-            } else {
-                (20.0, std::f32::consts::PI / 4.0, i - 20, 5)
-            };
-            let a = 2.0 * (-std::f32::consts::PI + step * base as f32);
-            let (x, z) = ((r * a.cos()).floor() as i32, (r * a.sin()).floor() as i32);
+            let (x, z) = dragon_node_column(i);
+            let add = if (12..20).contains(&i) { 15 } else { 5 };
             let y = (self.motion_blocking_no_leaves(x, z) + add).max(73);
             *node = [x, y, z];
         }
@@ -3043,12 +3052,11 @@ impl Game<'_> {
             self.level_event_at(3000, pos, 0);
             let _ = self.place_gateway_at(pos);
         }
-        if !self.fight.previously_killed
-            && let Some(egg) = self
-                .pack
-                .assets
-                .registry
-                .default_state("minecraft:dragon_egg")
+        if let Some(egg) = self
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:dragon_egg")
         {
             let y = (0..256)
                 .rev()
@@ -3058,12 +3066,22 @@ impl Game<'_> {
                 })
                 .map_or(64, |y| y + 1);
             let pos = BlockPos::new(0, y, 0);
+            let won_before = self.fight.previously_killed;
             let allowed = self.with_level(|_, level, _| {
-                let mut cancel = false;
+                // Vanilla's egg, on the first win only, which `dragon_egg_form` may cancel;
+                // then `dragon_fight_won`, asked on every win, may place one or leave it.
+                let mut forms = !won_before;
                 if level.native_authoritative {
-                    level.native_dragon_egg_form(level.dimension, pos, &mut cancel);
+                    if forms {
+                        let mut cancel = false;
+                        level.native_dragon_egg_form(level.dimension, pos, &mut cancel);
+                        forms = !cancel;
+                    }
+                    let mut egg = None;
+                    level.native_dragon_fight_won(level.dimension, pos, won_before, forms, &mut egg);
+                    forms = egg.unwrap_or(forms);
                 }
-                !cancel
+                forms
             });
             if allowed {
                 let _ = self.level_set([0, y, 0], egg);
@@ -5044,6 +5062,43 @@ use death_render::{dissolve_color, dissolve_mask};
 mod tests {
     use super::*;
 
+    /// Vanilla 26.3's `EnderDragon.findClosestNode` builds 24 nodes by feeding a
+    /// float angle to `Mth.cos`/`Mth.sin`, which index a 65,536-entry table of
+    /// f32 sines rather than calling `cosf`. Each pair is the `x`/`z` vanilla
+    /// floors out of that table; the comment on a line shows what
+    /// `f32::cos`/`f32::sin` gives there instead, one block off along an axis.
+    #[test]
+    fn dragon_path_nodes_match_the_vanilla_sine_table() {
+        let expected = [
+            (60, 0),  // cosf: (60, -1)
+            (51, 30), // cosf: (51, 29)
+            (29, 51),
+            (0, 60),
+            (-31, 51), // cosf: (-30, 51)
+            (-52, 29), // cosf: (-52, 30)
+            (-60, 0),
+            (-52, -31),
+            (-30, -52), // cosf: (-31, -52)
+            (0, -60),   // cosf: (-1, -60)
+            (29, -52),
+            (51, -30),
+            (40, 0), // cosf: (40, -1)
+            (28, 28),
+            (0, 40),
+            (-29, 28),
+            (-40, 0),
+            (-29, -29),
+            (0, -40), // cosf: (-1, -40)
+            (28, -29),
+            (20, 0), // cosf: (20, -1)
+            (0, 20),
+            (-20, 0),
+            (0, -20), // cosf: (-1, -20)
+        ];
+        let got: Vec<(i32, i32)> = (0..24).map(dragon_node_column).collect();
+        assert_eq!(got, expected);
+    }
+
     #[test]
     #[ignore = "daily"]
     fn a_spawn_egg_dragon_joins_once_and_a_canceled_spawn_fails() {
@@ -6317,6 +6372,9 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+#[path = "dragon/egg_tests.rs"]
+mod egg_tests;
 #[cfg(test)]
 #[path = "dragon/residency_tests.rs"]
 mod residency_tests;

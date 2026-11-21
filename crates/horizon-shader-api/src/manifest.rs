@@ -61,7 +61,7 @@ pub enum Fog {
     #[default]
     Engine,
     /// The pack fogs them itself: Horizon skips its fog there, and every stage's prelude has
-    /// `vanilla_fog` and the frame's `fog_environment` and `fog_render`.
+    /// `vanilla_fog`.
     Pack,
 }
 
@@ -153,8 +153,8 @@ pub struct Manifest {
     pub shadow: Option<Shadow>,
     /// Relief as geometry near the camera, if the pack asks for it; needs `[material]`.
     pub displacement: Option<Displacement>,
-    /// 0.2: the scene the post and material stages' `trace` reads, if the pack asks for it;
-    /// needs `[[post]]` or `[material]`.
+    /// 0.2: the scene that tracing stages read, if the pack asks for it; needs `[[post]]`,
+    /// `[[before_world]]`, `[material]` or `[entity]`.
     pub ray_tracing: Option<RayTracing>,
     /// 0.2: the motion guide the post stage's `motion_at` reads, if the pack asks for it;
     /// needs `[[post]]`.
@@ -163,13 +163,18 @@ pub struct Manifest {
     pub kept: crate::kept::Kept,
 }
 
-/// `[ray_tracing]` (0.2): the pack's post passes, and its material, compute and `[[before_world]]`
+/// `[ray_tracing]` (0.2): the pack's post passes, and its material, entity, compute and `[[before_world]]`
 /// stages where they call them, get `trace`, `trace_layers` and the other trace functions, which read the terrain around the
-/// camera where the device traces rays (`frame.has_ray_tracing`) and miss where it doesn't. No
-/// keys yet.
+/// camera where the device traces rays (`frame.has_ray_tracing`) and miss where it doesn't.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct RayTracing {}
+pub struct RayTracing {
+    /// `lights = true`: the stages whose files name them get the light sources around the
+    /// camera (`RayLight`, `ray_light`, `ray_lights_near`, ...), and the names are taken. Off,
+    /// the pack is built as without the key.
+    #[serde(default)]
+    pub lights: bool,
+}
 
 /// `[motion]` (0.2): the pack's post passes get `scene_motion`, `motion_at`, `MotionData` and
 /// the `MOTION_` kinds, how each pixel's surface moved since last frame. No keys yet.
@@ -415,8 +420,7 @@ pub struct Stage {
     /// Shown in the GPU time overlay; the file name when absent.
     #[serde(default)]
     pub name: Option<String>,
-    /// The material stage only: whether Horizon applies its fog after the pack's colour
-    /// (true when absent); false for a pack that fogs its surfaces itself.
+    /// No longer a key (`[frame] fog` replaced `[material] fog`): read only to say so.
     #[serde(default)]
     pub fog: Option<bool>,
     /// The material and entity stages only: `"engine"` (when absent) or `"pack"`,
@@ -620,9 +624,9 @@ struct RawBudget {
 }
 
 /// Whether `name` is taken from a pack's own WGSL names: by the post prelude's resources or, under
-/// `[ray_tracing]`, by its functions, or, under `[motion]`, by the motion guide's `scene_motion`
-/// and `motion_at`, or as a word WGSL reserves.
-pub(crate) fn taken(name: &str, ray_tracing: bool, motion: bool) -> bool {
+/// `[ray_tracing]`, by its functions (the light sources' only with `lights = true`), or, under
+/// `[motion]`, by the motion guide's `scene_motion` and `motion_at`, or as a word WGSL reserves.
+pub(crate) fn taken(name: &str, ray_tracing: Option<&RayTracing>, motion: bool) -> bool {
     // The post prelude's functions `[ray_tracing]` brings.
     let traced = [
         "trace",
@@ -652,7 +656,8 @@ pub(crate) fn taken(name: &str, ray_tracing: bool, motion: bool) -> bool {
         "scene_surface",
     ];
     reserved.contains(&name)
-        || (ray_tracing && traced.contains(&name))
+        || (ray_tracing.is_some() && traced.contains(&name))
+        || (ray_tracing.is_some_and(|r| r.lights) && crate::stages::LIGHT_NAMES.contains(&name))
         || (motion && guide.contains(&name))
         || naga::keywords::wgsl::RESERVED.contains(&name)
 }
@@ -676,7 +681,7 @@ pub(crate) fn target_name(name: &str) -> bool {
 /// texture writes it (`kept::kept_targets`).
 fn check_post_targets(
     post: &[Stage],
-    ray_tracing: bool,
+    ray_tracing: Option<&RayTracing>,
     motion: bool,
     kept: &[crate::kept::Resource],
 ) -> Result<(), String> {
@@ -800,14 +805,6 @@ impl Manifest {
             Some("pack") => Fog::Pack,
             Some(f) => return Err(err(format!("frame.fog {f:?}: engine or pack"))),
         };
-        if raw.frame.as_ref().is_some_and(|f| f.fog.is_some())
-            && raw.material.as_ref().is_some_and(|m| m.fog.is_some())
-        {
-            return Err(err(
-                "[material] fog and [frame] fog both set: keep [frame] fog, which covers every stage"
-                    .into(),
-            ));
-        }
         let id_ok = (1..=64).contains(&raw.id.len())
             && raw
                 .id
@@ -840,13 +837,19 @@ impl Manifest {
             .sky
             .iter()
             .chain(&raw.vertex)
+            .chain(&raw.material)
+            .chain(&raw.weather)
             .chain(&raw.post)
             .chain(&raw.tonemap)
             .chain(&raw.entity)
             .chain(&raw.before_world)
             .any(|s| s.fog.is_some())
         {
-            return Err(err("`fog` is a key of [material] only".into()));
+            return Err(err(
+                "[material] fog is gone: [frame] fog = \"pack\" for a pack that fogs its stages \
+                 itself (the entity stage too), else leave it out and Horizon fogs them"
+                    .into(),
+            ));
         }
         if raw
             .sky
@@ -900,7 +903,7 @@ impl Manifest {
         let resets = (raw.options.iter())
             .filter_map(|o| Some((o.id.clone(), o.resets.clone()?)))
             .collect();
-        let traced = raw.ray_tracing.is_some();
+        let traced = raw.ray_tracing.as_ref();
         let moving = raw.motion.is_some();
         let kept = crate::kept::check(
             raw.kept,
@@ -918,12 +921,14 @@ impl Manifest {
             }
         }
         check_post_targets(&raw.post, traced, moving, &kept.resources).map_err(err)?;
-        let tracer =
-            !raw.post.is_empty() || raw.material.is_some() || !kept.before_world.is_empty();
+        let tracer = !raw.post.is_empty()
+            || raw.material.is_some()
+            || raw.entity.is_some()
+            || !kept.before_world.is_empty();
         if raw.ray_tracing.is_some() && !tracer {
             return Err(err(
-                "[ray_tracing] needs a [[post]] pass, a [[before_world]] pass or a [material] \
-                 stage: `trace` is theirs"
+                "[ray_tracing] needs a [[post]] pass, a [[before_world]] pass, a [material] or an \
+                 [entity] stage: `trace` is theirs"
                     .into(),
             ));
         }
@@ -991,7 +996,7 @@ impl Manifest {
             options.push(option);
         }
         // `RayHit` has a surface's tags and material id, as `MaterialInput` does.
-        if !raw.tags.is_empty() && raw.material.is_none() && !traced {
+        if !raw.tags.is_empty() && raw.material.is_none() && traced.is_none() {
             return Err(err("tags are read by the material stage and by `trace`: \
                  give it a [material] or a [ray_tracing]"
                 .into()));
@@ -1018,7 +1023,7 @@ impl Manifest {
             }
         }
         let solid_ids = raw.shadow.iter().any(|s| !s.solid_materials.is_empty());
-        if !raw.materials.is_empty() && raw.material.is_none() && !solid_ids && !traced {
+        if !raw.materials.is_empty() && raw.material.is_none() && !solid_ids && traced.is_none() {
             return Err(err(
                 "materials are read by the material stage, `trace` and \
                  shadow.solid_materials: give it a [material] or a [ray_tracing], or use \
